@@ -1,3 +1,6 @@
+# My-First-Project
+My first HTML CSS JavaScript project
+
 # Government Secondary School, Bildi — Supabase-connected starter
 
 ## Setup
