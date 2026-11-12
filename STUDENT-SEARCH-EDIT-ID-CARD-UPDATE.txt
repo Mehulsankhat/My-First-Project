@@ -1,0 +1,23 @@
+STUDENT SEARCH, EDIT & ID CARD UPDATE
+
+Features added:
+- Search students by GR number, name, standard, stream, division or roll number.
+- Admin can edit student name, standard, stream, division, roll number and guardian details.
+- Print an individual student ID card. The card includes school name, GR number, standard, stream, division and roll number.
+- Optional photo URL can be saved while editing a student. If no URL is provided, the card shows a photo placeholder.
+
+IMPORTANT SUPABASE STEP:
+After replacing the project, open Supabase > SQL Editor and run this safe SQL once:
+
+ALTER TABLE public.students ADD COLUMN IF NOT EXISTS photo_url text;
+
+The full supabase/school-management-schema.sql also includes this safe addition. Do not drop tables or delete existing records.
+
+Run locally from the folder containing package.json:
+  npm install
+  npm run build
+  npm run dev
+
+Keep your existing .env file (copy it into this project folder). Do not share .env or service-role keys.
+
+Note: build could not be executed in the packaging environment because Vite was not installed there. Run npm install and npm run build on your computer before deploying.

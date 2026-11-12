@@ -1,0 +1,14 @@
+GALLERY UPLOAD RLS FIX
+
+1. In Supabase Dashboard, open the SAME project connected in src/supabase.js.
+2. Open SQL Editor, paste/run: supabase/gallery-media-upgrade.sql
+   This safely replaces policies on public.gallery_items and the school-gallery bucket.
+   It does not delete existing gallery rows or uploaded images.
+3. Keep your existing local .env file (VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY).
+   This ZIP intentionally excludes .env secrets.
+4. Open the folder containing package.json and run:
+      npm install
+      npm run dev
+
+Gallery uploads now store images under: <logged-in-user-uid>/<random-file-name>
+The code reports whether the Storage upload or gallery database insert was denied.

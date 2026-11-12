@@ -197,18 +197,36 @@ function render() {
         </div>
       </section>
 
-      <section class="section gallery-section" id="gallery">
-        <div class="container">
-          <div class="section-heading"><div><span class="section-kicker">${t("gallery")}</span><h2>${t("galleryTitle")}</h2><p>${t("gallerySub")}</p></div></div>
-          <div class="gallery-grid">
-            <div class="gallery-tile tile-one"><span>📚</span><b>${currentLanguage === "gu" ? "અભ્યાસ" : "Learning"}</b></div>
-            <div class="gallery-tile tile-two"><span>🌱</span><b>${currentLanguage === "gu" ? "પ્રકૃતિ" : "Nature"}</b></div>
-            <div class="gallery-tile tile-three"><span>🏆</span><b>${currentLanguage === "gu" ? "સિદ્ધિ" : "Achievement"}</b></div>
-          </div>
-          <p class="gallery-note">${t("galleryNote")}</p>
-        </div>
-      </section>
+      
+<section class="section gallery-section" id="gallery">
+    <div class="container">
 
+        <div class="section-heading">
+            <div>
+                <span class="section-kicker">${t("gallery")}</span>
+                <h2>${t("galleryTitle")}</h2>
+                <p>${t("gallerySub")}</p>
+            </div>
+        </div>
+
+        <!-- Public gallery is read-only. Photo management is available in Staff Login. -->
+        <!-- PUBLIC PHOTO GALLERY -->
+        <div class="gallery-grid" id="publicGalleryGrid">
+            <p class="gallery-note">
+                ${currentLanguage === "gu"
+                ? "શાળાના ફોટા લોડ થઈ રહ્યા છે..."
+                : "Loading school photos..."}
+            </p>
+        </div>
+
+        <p class="gallery-note">
+            ${currentLanguage === "gu"
+            ? "શાળાના સ્ટાફ દ્વારા અપલોડ કરેલા ફોટા અહીં દેખાશે."
+            : "Photos uploaded by school staff appear here."}
+        </p>
+
+    </div>
+</section>
       <section class="contact-section" id="contact">
         <div class="container">
           <div class="contact-heading"><span class="section-kicker">${t("contact")}</span><h2>${t("contactTitle")}</h2><p>${t("contactSub")}</p></div>
@@ -229,19 +247,147 @@ function render() {
     </footer>
   `;
 
-  if (supabaseConfigured) {
-    supabase.from("notices").select("id,title,details,created_at").order("created_at", { ascending: false }).limit(3)
-      .then(({ data, error }) => {
-        const grid = document.querySelector(".notice-grid");
-        if (!grid || error || !data?.length) return;
-        grid.innerHTML = data.map(n => `
-          <article class="notice-card">
-            <div class="notice-top"><span class="notice-icon">📢</span><span class="notice-label">${currentLanguage === "gu" ? "સૂચના" : "NOTICE"}</span></div>
-            <h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.details)}</p>
-            <span class="notice-date">${new Date(n.created_at).toLocaleDateString()}</span>
-          </article>`).join("");
-      });
-  }
+  
+// =====================================
+// PUBLIC GALLERY - LOAD PHOTOS
+// =====================================
+
+async function loadPublicGallery() {
+
+    const grid = document.querySelector("#publicGalleryGrid");
+
+    if (!grid || !supabaseConfigured) return;
+
+    const { data, error } = await supabase
+        .from("gallery_items")
+        .select("id,title,image_url,caption,created_at")
+        .eq("is_published", true)
+        .order("created_at", { ascending: false });
+
+    if (error) {
+        grid.innerHTML =
+            `<p class="gallery-note">${escapeHtml(error.message)}</p>`;
+        return;
+    }
+
+    grid.innerHTML = data?.length
+        ? data.map(item => `
+            <article class="gallery-tile gallery-photo">
+                <button class="gallery-photo-open" type="button" data-gallery-index="${data.indexOf(item)}" aria-label="View ${escapeHtml(item.title)} full screen">
+                  <img src="${escapeHtml(item.image_url)}"
+                       alt="${escapeHtml(item.title)}"
+                       loading="lazy">
+                  <span class="gallery-expand-label">⛶ View photo</span>
+                </button>
+
+                <div>
+                    <b>${escapeHtml(item.title)}</b>
+                    ${item.caption
+                        ? `<p>${escapeHtml(item.caption)}</p>`
+                        : ""}
+                </div>
+            </article>
+        `).join("")
+        : `<p class="gallery-note">
+            ${currentLanguage === "gu"
+                ? "હજુ કોઈ ફોટા અપલોડ થયા નથી."
+                : "No photos uploaded yet."}
+           </p>`;
+
+
+    setupGalleryViewer(data || []);
+}
+
+
+// Public photo lightbox: read-only, keyboard accessible, zoom and next/previous.
+function setupGalleryViewer(photos) {
+  document.querySelector("#schoolPhotoViewer")?.remove();
+  if (!photos.length) return;
+  const overlay = document.createElement("div");
+  overlay.id = "schoolPhotoViewer";
+  overlay.className = "school-photo-viewer";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", "Gallery photo viewer");
+  overlay.hidden = true;
+  overlay.innerHTML = `
+    <div class="photo-viewer-top">
+      <span id="photoViewerCounter"></span>
+      <div class="photo-viewer-actions">
+        <button type="button" data-viewer-action="zoom-out" aria-label="Zoom out">−</button>
+        <button type="button" data-viewer-action="zoom-in" aria-label="Zoom in">+</button>
+        <button type="button" data-viewer-action="reset" aria-label="Reset zoom">100%</button>
+        <button type="button" data-viewer-action="close" aria-label="Close photo viewer">✕</button>
+      </div>
+    </div>
+    <div class="photo-viewer-stage">
+      <button type="button" class="photo-viewer-arrow" data-viewer-action="prev" aria-label="Previous photo">❮</button>
+      <img id="photoViewerImage" alt="" />
+      <button type="button" class="photo-viewer-arrow" data-viewer-action="next" aria-label="Next photo">❯</button>
+    </div>
+    <div class="photo-viewer-caption"><strong id="photoViewerTitle"></strong><p id="photoViewerCaption"></p></div>`;
+  document.body.appendChild(overlay);
+  let index = 0;
+  let zoom = 1;
+  let returnFocus = null;
+  const img = overlay.querySelector("#photoViewerImage");
+  const update = () => {
+    const photo = photos[index];
+    img.src = photo.image_url;
+    img.alt = photo.title || "School gallery photo";
+    overlay.querySelector("#photoViewerTitle").textContent = photo.title || "";
+    overlay.querySelector("#photoViewerCaption").textContent = photo.caption || "";
+    overlay.querySelector("#photoViewerCounter").textContent = `${index + 1} / ${photos.length}`;
+    zoom = 1;
+    img.style.transform = "scale(1)";
+    overlay.querySelectorAll(".photo-viewer-arrow").forEach(b => { b.hidden = photos.length < 2; });
+  };
+  const close = () => {
+    overlay.hidden = true;
+    document.body.classList.remove("photo-viewer-open");
+    document.removeEventListener("keydown", onKey);
+    returnFocus?.focus();
+  };
+  const onKey = event => {
+    if (event.key === "Escape") close();
+    if (event.key === "ArrowLeft" && photos.length > 1) { index = (index - 1 + photos.length) % photos.length; update(); }
+    if (event.key === "ArrowRight" && photos.length > 1) { index = (index + 1) % photos.length; update(); }
+  };
+  const open = (nextIndex, trigger) => {
+    index = nextIndex;
+    returnFocus = trigger;
+    update();
+    overlay.hidden = false;
+    document.body.classList.add("photo-viewer-open");
+    overlay.querySelector('[data-viewer-action="close"]').focus();
+    document.addEventListener("keydown", onKey);
+  };
+  document.querySelectorAll("[data-gallery-index]").forEach(button => {
+    button.addEventListener("click", () => open(Number(button.dataset.galleryIndex), button));
+  });
+  overlay.addEventListener("click", event => {
+    if (event.target === overlay) close();
+    const button = event.target.closest("[data-viewer-action]");
+    if (!button) return;
+    switch (button.dataset.viewerAction) {
+      case "close": close(); break;
+      case "prev": index = (index - 1 + photos.length) % photos.length; update(); break;
+      case "next": index = (index + 1) % photos.length; update(); break;
+      case "zoom-in": zoom = Math.min(3, zoom + 0.25); img.style.transform = `scale(${zoom})`; break;
+      case "zoom-out": zoom = Math.max(1, zoom - 0.25); img.style.transform = `scale(${zoom})`; break;
+      case "reset": zoom = 1; img.style.transform = "scale(1)"; break;
+    }
+  });
+}
+
+// Public gallery has no upload controls or upload event handlers.
+// Authenticated staff upload/edit/delete photos in the staff dashboard.
+
+// =====================================
+// INITIALIZE GALLERY
+// =====================================
+
+loadPublicGallery();
 
   document.querySelector("#languageToggle").addEventListener("click", () => {
     currentLanguage = currentLanguage === "gu" ? "en" : "gu";
@@ -294,47 +440,45 @@ async function renderPortal() {
 
   if (!session) {
     app.innerHTML = `
-      <main class="portal-page">
-        <a class="portal-back" href="#home">← ${currentLanguage === "gu" ? "મુખ્ય વેબસાઇટ પર પાછા જાઓ" : "Back to school website"}</a>
-        <section class="login-card">
-          <img src="/school-logo.jpeg" alt="School logo" class="login-logo" />
-          <p class="portal-kicker">GOVERNMENT SECONDARY SCHOOL · BILDI</p>
-          <h1>${currentLanguage === "gu" ? "સ્ટાફ લોગિન" : "Staff Login"}</h1>
-          <p class="portal-muted">${currentLanguage === "gu" ? "પ્રિન્સિપાલ અથવા શિક્ષક તરીકે પ્રવેશ કરો" : "Sign in as Principal / Admin or Teacher"}</p>
-          <form id="staffLoginForm" class="portal-form">
-            <label>Email<input id="loginEmail" type="email" required placeholder="Your registered email" autocomplete="username" /></label>
-            <label>Password<input id="loginPassword" type="password" required placeholder="Your password" autocomplete="current-password" /></label>
-            <p id="loginError" class="portal-error" aria-live="polite"></p>
-            <button class="portal-primary" type="submit">Sign in</button>
-          </form>
-          <p class="portal-warning">Use the staff accounts created in Supabase Authentication. Access is controlled by the role in the profiles table.</p>
-        </section>
-      </main>`;
-    document.querySelector("#staffLoginForm").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const button = event.currentTarget.querySelector("button[type=submit]");
-      const errorBox = document.querySelector("#loginError");
-      button.disabled = true;
-      button.textContent = "Signing in…";
-      errorBox.textContent = "";
-      const email = document.querySelector("#loginEmail").value.trim();
-      const password = document.querySelector("#loginPassword").value;
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        errorBox.textContent = error.message;
-        button.disabled = false;
-        button.textContent = "Sign in";
-        return;
-      }
-      try {
-        await getStaffProfile(data.user.id);
-        await renderPortal();
-      } catch (profileError) {
-        await supabase.auth.signOut();
-        errorBox.textContent = "This account has no valid staff profile. Ask the school administrator to check the profiles table.";
-        button.disabled = false;
-        button.textContent = "Sign in";
-      }
+      <main class="portal-page"><a class="portal-back" href="#home">← Back to school website</a>
+        <section class="login-card"><img src="/school-logo.jpeg" alt="School logo" class="login-logo" />
+          <p class="portal-kicker">GOVERNMENT SECONDARY SCHOOL · BILDI</p><h1>Staff Portal</h1>
+          <div id="staffLoginView"><p class="portal-muted">Principal, Admin or Teacher sign in</p>
+            <form id="staffLoginForm" class="portal-form">
+              <label>Email<input id="loginEmail" type="email" required autocomplete="username" /></label>
+              <label>Password<input id="loginPassword" type="password" required autocomplete="current-password" /></label>
+              <p id="loginError" class="portal-error" aria-live="polite"></p><button class="portal-primary" type="submit">Sign in</button>
+            </form><button id="showRegister" class="portal-secondary" type="button">Create staff account</button>
+          </div>
+          <div id="staffRegisterView" hidden><p class="portal-muted">New account registration (Admin approval required)</p>
+            <form id="staffRegisterForm" class="portal-form">
+              <label>Full name<input id="regName" required maxlength="100" /></label>
+              <label>Email<input id="regEmail" type="email" required /></label>
+              <label>Phone<input id="regPhone" type="tel" maxlength="20" /></label>
+              <label>Register as<select id="regRole" required><option value="teacher">Teacher</option><option value="principal">Principal</option><option value="admin">Admin</option></select></label>
+              <label>Password<input id="regPassword" type="password" minlength="8" required /></label>
+              <label>Confirm password<input id="regConfirm" type="password" minlength="8" required /></label>
+              <p id="registerMessage" class="portal-error" aria-live="polite"></p><button class="portal-primary" type="submit">Submit registration</button>
+            </form><button id="showLogin" class="portal-secondary" type="button">Back to login</button>
+          </div>
+          <p class="portal-warning">New accounts remain pending until an existing Admin or approved Principal approves them. Verify your email if requested.</p>
+        </section></main>`;
+    const loginView=document.querySelector('#staffLoginView'), registerView=document.querySelector('#staffRegisterView');
+    document.querySelector('#showRegister').onclick=()=>{loginView.hidden=true;registerView.hidden=false;};
+    document.querySelector('#showLogin').onclick=()=>{registerView.hidden=true;loginView.hidden=false;};
+    document.querySelector('#staffRegisterForm').addEventListener('submit',async e=>{
+      e.preventDefault(); const msg=document.querySelector('#registerMessage'); msg.textContent='Submitting…';
+      const password=document.querySelector('#regPassword').value;
+      if(password!==document.querySelector('#regConfirm').value){msg.textContent='Passwords do not match.';return;}
+      const {error}=await supabase.auth.signUp({email:document.querySelector('#regEmail').value.trim(),password,options:{data:{full_name:document.querySelector('#regName').value.trim(),phone:document.querySelector('#regPhone').value.trim(),requested_role:document.querySelector('#regRole').value}}});
+      msg.textContent=error?error.message:'Registration submitted. Please verify your email if prompted. Your account is PENDING until an Admin or Principal approves it.';
+      if(!error)e.currentTarget.reset();
+    });
+    document.querySelector('#staffLoginForm').addEventListener('submit',async e=>{
+      e.preventDefault();const button=e.currentTarget.querySelector('button[type=submit]'),errorBox=document.querySelector('#loginError');button.disabled=true;errorBox.textContent='';
+      const {data,error}=await supabase.auth.signInWithPassword({email:document.querySelector('#loginEmail').value.trim(),password:document.querySelector('#loginPassword').value});
+      if(error){errorBox.textContent=error.message;button.disabled=false;return;}
+      try{await getStaffProfile(data.user.id);await renderPortal();}catch{await supabase.auth.signOut();errorBox.textContent='Account is pending approval or has no approved staff profile.';button.disabled=false;}
     });
     return;
   }
@@ -348,37 +492,437 @@ async function renderPortal() {
     return;
   }
 
-  const isAdmin = profile.role === "admin";
+  const isAdmin = profile.role === "admin" || profile.role === "principal";
   if (!isAdmin && profile.role !== "teacher") {
     await supabase.auth.signOut();
     app.innerHTML = `<main class="portal-page"><section class="login-card"><h1>Access denied</h1><a href="#home">Back to website</a></section></main>`;
     return;
   }
 
-  const [noticeResult, homeworkResult] = await Promise.all([
+  const [noticeResult, homeworkResult, studentResult, marksResult, galleryResult] = await Promise.all([
     supabase.from("notices").select("id,title,details,created_at").order("created_at", { ascending: false }),
-    supabase.from("homework").select("id,class_name,subject,details,created_at").order("created_at", { ascending: false })
+    supabase.from("homework").select("id,class_name,subject,details,created_at,created_by").order("created_at", { ascending: false }),
+    supabase.from("students").select("id,admission_no,full_name,standard,stream,division,roll_no,guardian_name,guardian_phone,status,photo_url").order("standard").order("roll_no"),
+    supabase.from("exam_marks").select("id,student_id,academic_year,exam_name,subject,marks_obtained,max_marks,remarks,created_at").order("created_at",{ascending:false}),
+    supabase.from("gallery_items").select("id,title,image_url,caption,is_published,created_by,created_at").order("created_at",{ascending:false})
   ]);
+  let registrationRequests=[]; let registrationError=null;
+  if(isAdmin){const rr=await supabase.from("staff_registration_requests").select("id,full_name,email,phone,requested_role,status,created_at").eq("status","pending").order("created_at",{ascending:true});registrationRequests=rr.data||[];registrationError=rr.error;}
   const notices = noticeResult.data || [];
   const homework = homeworkResult.data || [];
+  const students = studentResult.data || [];
+  const examMarks = marksResult.data || [];
+  const galleryItems = galleryResult.data || [];
+  const today = new Date().toLocaleDateString("en-CA");
+  const attendanceResult = await supabase.from("attendance")
+    .select("id,student_id,status,remarks")
+    .eq("attendance_date", today);
+  const attendanceRows = attendanceResult.data || [];
   app.innerHTML = `
     <main class="portal-page portal-dashboard">
       <header class="portal-topbar"><a class="portal-brand" href="#home"><img src="/school-logo.jpeg" alt="School logo"/><span>GSS Bildi<br><small>Staff Portal</small></span></a><div class="portal-user"><span>${escapeHtml(profile.full_name)}</span><button id="logoutBtn" class="portal-logout">Log out</button></div></header>
       <div class="portal-content"><a class="portal-back" href="#home">← Public website</a>
-        <div class="portal-welcome"><div><p class="portal-kicker">STAFF DASHBOARD</p><h1>${isAdmin ? "Principal / Admin Dashboard" : "Teacher Dashboard"}</h1><p class="portal-muted">${isAdmin ? "Manage school announcements and review homework." : "Share homework and class learning updates."}</p></div><span class="role-chip">${isAdmin ? "ADMIN" : "TEACHER"}</span></div>
-        <div class="portal-stats"><article><span>📢</span><b>${notices.length}</b><small>Notices</small></article><article><span>📘</span><b>${homework.length}</b><small>Homework posts</small></article><article><span>🔐</span><b>${isAdmin ? "Full" : "Limited"}</b><small>Access level</small></article></div>
+        <div class="portal-welcome"><div><p class="portal-kicker">STAFF DASHBOARD</p><h1>${isAdmin ? "Principal / Admin Dashboard" : "Teacher Dashboard"}</h1><p class="portal-muted">${isAdmin ? "Manage school announcements and review homework." : "Share homework and class learning updates."}</p></div><span class="role-chip">${profile.role.toUpperCase()}</span></div>
+        <div class="portal-stats"><article><span>📢</span><b>${notices.length}</b><small>Notices</small></article><article><span>📘</span><b>${homework.length}</b><small>Homework posts</small></article><article><span>🎓</span><b>${students.length}</b><small>Students</small></article><article><span>🔐</span><b>${isAdmin ? "Full" : "Limited"}</b><small>Access level</small></article></div>
         ${noticeResult.error ? `<p class="portal-error">Notices: ${escapeHtml(noticeResult.error.message)}</p>` : ""}
         ${homeworkResult.error ? `<p class="portal-error">Homework: ${escapeHtml(homeworkResult.error.message)}</p>` : ""}
+        ${isAdmin ? `<section class="portal-panel"><h2>Staff Registration Approvals</h2>${registrationError?`<p class="portal-error">Run supabase/staff-registration-approval.sql first: ${escapeHtml(registrationError.message)}</p>`:registrationRequests.length?`<div class="portal-list">${registrationRequests.map(r=>`<article><div><b>${escapeHtml(r.full_name)}</b><p>${escapeHtml(r.email)} · ${escapeHtml(r.phone||"No phone")} · Requested: ${escapeHtml(r.requested_role.toUpperCase())}</p></div><div class="student-actions"><button class="portal-primary" data-approve-registration="${r.id}">Approve</button><button class="portal-delete" data-reject-registration="${r.id}">Reject</button></div></article>`).join("")}</div>`:`<p class="portal-muted">No pending registrations.</p>`}</section>` : ""}
         ${isAdmin ? `<section class="portal-panel"><h2>Publish a school notice</h2><form id="noticeForm" class="portal-form portal-inline-form"><label>Notice title<input id="noticeTitle" required maxlength="100" /></label><label>Details<textarea id="noticeDetails" required rows="3" maxlength="500"></textarea></label><button class="portal-primary" type="submit">Publish notice</button><p id="noticeError" class="portal-error"></p></form><h3>Saved notices</h3><div class="portal-list">${notices.length ? notices.map(n=>`<article><div><b>${escapeHtml(n.title)}</b><p>${escapeHtml(n.details)}</p></div><button class="portal-delete" data-delete-notice="${n.id}">Delete</button></article>`).join("") : `<p class="portal-muted">No notices added yet.</p>`}</div></section>` : ""}
         ${!isAdmin ? `<section class="portal-panel"><h2>Post class homework</h2><form id="homeworkForm" class="portal-form portal-inline-form"><label>Class<input id="homeworkClass" required placeholder="e.g. Standard 9" /></label><label>Subject<input id="homeworkSubject" required placeholder="e.g. Mathematics" /></label><label>Homework details<textarea id="homeworkDetails" required rows="3"></textarea></label><button class="portal-primary" type="submit">Save homework</button><p id="homeworkError" class="portal-error"></p></form></section>` : ""}
+        <section class="portal-panel" id="galleryManagePanel">
+          <h2>School Photo Gallery</h2>
+          <p class="portal-muted">Upload photos from your logged-in account. Published photos appear automatically on the public website. You can edit or delete your own uploads.</p>
+          ${galleryResult.error ? `<p class="portal-error">Run supabase/gallery-media-upgrade.sql: ${escapeHtml(galleryResult.error.message)}</p>` : ""}
+          <form id="galleryUploadForm" class="portal-form portal-inline-form">
+            <label>Photo title<input id="galleryTitle" required maxlength="100" /></label>
+            <label>Caption<input id="galleryCaption" maxlength="250" /></label>
+            <label>Choose photo<input id="galleryFile" type="file" accept="image/jpeg,image/png,image/webp" required /></label>
+            <button class="portal-primary" type="submit">Upload photo to website</button><p id="galleryUploadError" class="portal-error"></p>
+          </form>
+          <div class="portal-list">${galleryItems.length ? galleryItems.map(g=>`<article class="gallery-admin-row"><img src="${escapeHtml(g.image_url)}" alt="${escapeHtml(g.title)}"><div><b>${escapeHtml(g.title)}</b><p>${escapeHtml(g.caption||"")}</p><small>${g.is_published ? "Published on website" : "Not published"}</small></div>${g.created_by===session.user.id ? `<div class="student-actions"><button type="button" class="portal-primary" data-edit-gallery="${g.id}">Edit</button><button type="button" class="portal-delete" data-delete-gallery="${g.id}" data-image-url="${encodeURIComponent(g.image_url)}">Delete</button></div>` : ""}</article>`).join("") : `<p class="portal-muted">No photos uploaded yet.</p>`}</div>
+        </section>
+        <section class="portal-panel" id="examMarksPanel">
+          <h2>Examination & Marks Management</h2>
+          <p class="portal-muted">Add, edit, delete and download student subject marks. Records are saved in Supabase.</p>
+          ${marksResult.error ? `<p class="portal-error">Marks table not ready. Run supabase/exam-marks-management.sql first: ${escapeHtml(marksResult.error.message)}</p>` : ""}
+          <form id="examMarksForm" class="portal-form portal-inline-form">
+            <input id="markEditId" type="hidden" />
+            <label>Student<select id="markStudent" required><option value="">Select student</option>${students.map(st=>`<option value="${st.id}">${escapeHtml(st.full_name)} · GR ${escapeHtml(st.admission_no)} · Std ${escapeHtml(st.standard)}-${escapeHtml(st.division||"A")}</option>`).join("")}</select></label>
+            <label>Academic year<input id="markYear" required value="2026-27" maxlength="12" /></label>
+            <label>Exam name<input id="markExam" required placeholder="Annual / Unit Test 1" maxlength="80" /></label>
+            <label>Subject<input id="markSubject" required placeholder="Gujarati / English / Maths" maxlength="80" /></label>
+            <label>Marks obtained<input id="markObtained" type="number" min="0" step="0.01" required /></label>
+            <label>Maximum marks<input id="markMaximum" type="number" min="0.01" step="0.01" value="100" required /></label>
+            <label>Remarks<input id="markRemarks" maxlength="200" /></label>
+            <button class="portal-primary" type="submit" id="saveMarksBtn">Save marks</button>
+            <button class="portal-secondary" type="button" id="cancelMarksEdit" hidden>Cancel edit</button>
+            <p id="marksError" class="portal-error"></p>
+          </form>
+          <div class="portal-form portal-inline-form">
+            <label>Filter standard<select id="marksFilterStandard"><option value="">All standards</option>${["9","10","11","12"].map(v=>`<option value="${v}">Std ${v}</option>`).join("")}</select></label>
+            <label>Filter exam<input id="marksFilterExam" placeholder="Search exam name" /></label>
+            <button class="portal-primary" type="button" id="downloadMarksCsv">Download marks (Excel CSV)</button>
+          </div>
+          <div class="portal-list" id="examMarksList">${examMarks.length ? examMarks.map(m=>{const st=students.find(x=>String(x.id)===String(m.student_id));return `<article data-mark-row><div><b>${escapeHtml(st?.full_name||"Unknown student")} · ${escapeHtml(m.subject)}</b><p>GR ${escapeHtml(st?.admission_no||"—")} · Std ${escapeHtml(st?.standard||"—")} · ${escapeHtml(m.exam_name)} · ${escapeHtml(m.academic_year)}</p><small>${m.marks_obtained} / ${m.max_marks}${m.remarks?` · ${escapeHtml(m.remarks)}`:""}</small></div><div class="student-actions"><button type="button" class="portal-primary" data-edit-mark="${m.id}">Edit</button><button type="button" class="portal-delete" data-delete-mark="${m.id}">Delete</button></div></article>`}).join("") : `<p class="portal-muted">No marks added yet.</p>`}</div>
+          <section class="result-report-panel" id="resultReportPanel">
+            <h3>Automatic Result, Percentage & Top 10</h3>
+            <p class="portal-muted">Select one standard, academic year and exam. Percentage is calculated from total obtained marks ÷ total maximum marks. A student passes only when every subject meets the pass percentage.</p>
+            <div class="portal-form portal-inline-form result-filters">
+              <label>Standard<select id="resultStandard"><option value="">Select standard</option>${["9","10","11","12"].map(v=>`<option value="${v}">Std ${v}</option>`).join("")}</select></label>
+              <label>Academic year<input id="resultYear" value="2026-27" maxlength="12" /></label>
+              <label>Exam name<input id="resultExam" placeholder="Enter exact exam name" /></label>
+              <label>Pass percentage (%)<input id="resultPassMark" type="number" min="0" max="100" step="0.01" value="33" /></label>
+              <button class="portal-primary" type="button" id="generateResult">Generate result</button>
+              <button class="portal-primary" type="button" id="downloadResultCsv" disabled>Download result Excel CSV</button>
+              <button class="portal-primary" type="button" id="downloadTop10Csv" disabled>Download Top 10 CSV</button>
+            </div>
+            <p id="resultReportMessage" class="portal-muted" aria-live="polite">Choose standard and enter exact exam name to generate the result.</p>
+            <div class="portal-list" id="resultReportList"></div>
+          </section>
+        </section>
+        <section class="portal-panel">
+          <h2>Student Management</h2>
+          ${studentResult.error ? `<p class="portal-error">Students table not ready: ${escapeHtml(studentResult.error.message)}. Run the supplied Supabase schema SQL first.</p>` : ""}
+          ${`<form id="studentForm" class="portal-form portal-inline-form">
+            <label>Admission / GR No.<input id="studentAdmission" required maxlength="30" /></label>
+            <label>Student full name<input id="studentName" required maxlength="120" /></label>
+            <label>Standard<select id="studentStandard" required><option value="9">Std. 9</option><option value="10">Std. 10</option><option value="11">Std. 11</option><option value="12">Std. 12</option></select></label>
+            <label>Stream<select id="studentStream"><option value="General">General</option><option value="Science">Science</option><option value="Commerce">Commerce</option><option value="Arts">Arts</option></select></label>
+            <label>Division<input id="studentDivision" value="A" maxlength="5" /></label>
+            <label>Roll No.<input id="studentRoll" type="number" min="1" /></label>
+            <label>Guardian name<input id="guardianName" required maxlength="120" placeholder="Enter parent / guardian name" /></label>
+            <label>Guardian phone<input id="guardianPhone" type="tel" required maxlength="20" placeholder="Enter guardian mobile number" /></label>
+            <button class="portal-primary" type="submit">Add student</button><p id="studentError" class="portal-error"></p>
+          </form>`}
+          <section class="portal-bulk-upload">
+            <h3>Bulk Student Upload · Std. 9 to 12</h3>
+            <p class="portal-muted">Excel માંથી CSV UTF-8 તરીકે Save કરીને અહીં Upload કરો. પહેલા Standard પસંદ કરો; Std. 11–12 માટે Stream પણ પસંદ કરો.</p>
+            <div class="portal-form">
+              <label>Upload Standard<select id="bulkStandard"><option value="9">Std. 9</option><option value="10">Std. 10</option><option value="11">Std. 11</option><option value="12">Std. 12</option></select></label>
+              <label>Stream<select id="bulkStream"><option value="General">General</option><option value="Science">Science</option><option value="Commerce">Commerce</option><option value="Arts">Arts</option></select></label>
+              <button class="portal-primary" type="button" id="downloadStudentTemplate">Download Excel-compatible CSV Template</button>
+              <label>Choose CSV file<input id="bulkStudentFile" type="file" accept=".csv,text/csv" /></label>
+              <button class="portal-primary" type="button" id="previewStudentUpload">Preview Students</button>
+              <p id="bulkStudentStatus" class="portal-muted" aria-live="polite"></p>
+              <div id="bulkStudentPreview"></div>
+              <button class="portal-primary" type="button" id="confirmStudentUpload" hidden>Upload Previewed Students</button>
+            </div>
+          </section>
+          <label class="student-search-label">Search students<input id="studentSearch" type="search" placeholder="Search by GR number, name, standard or division..." /></label>
+          <div class="portal-list" id="studentList">${students.length ? students.map(st=>`<article data-student-row data-search="${escapeHtml([st.admission_no,st.full_name,st.standard,st.stream,st.division,st.roll_no].join(" ").toLowerCase())}"><div><b>${escapeHtml(st.full_name)}</b><p>GR: ${escapeHtml(st.admission_no)} · Std ${escapeHtml(st.standard)}${st.stream && st.stream !== "General" ? " · "+escapeHtml(st.stream) : ""}-${escapeHtml(st.division || "A")} · Roll: ${st.roll_no ?? "—"}</p>${(st.guardian_name || st.guardian_phone) ? `<small>Guardian: ${escapeHtml(st.guardian_name || "—")} · Phone: ${escapeHtml(st.guardian_phone || "—")}</small>` : ""}</div><div class="student-actions"> <button type="button" class="portal-primary" data-id-card="${st.id}">Print ID</button>${isAdmin ? `<button type="button" class="portal-primary" data-edit-student="${st.id}">Edit</button><button class="portal-delete" data-delete-student="${st.id}">Delete</button>` : ""}</div></article>`).join("") : `<p class="portal-muted">No students added yet.</p>`}</div>
+        </section>
+        <section class="portal-panel">
+          <h2>Daily Attendance · ${today}</h2>
+          ${studentResult.error ? `<p class="portal-muted">Student list will appear after the database schema is installed.</p>` : ""}
+          <p class="portal-muted">Select Present, Absent, Late or Leave for each student, then save attendance.</p>
+          <form id="attendanceForm" class="portal-form">
+            ${students.filter(st=>st.status==="active").map(st=>{
+              const saved=attendanceRows.find(a=>a.student_id===st.id);
+              return `<label class="attendance-row"><span>${escapeHtml(st.full_name)} · ${escapeHtml(st.standard)}-${escapeHtml(st.division || "A")} (GR ${escapeHtml(st.admission_no)})</span><select name="attendance-${st.id}"><option value="present" ${saved?.status==="present"?"selected":""}>Present</option><option value="absent" ${saved?.status==="absent"?"selected":""}>Absent</option><option value="late" ${saved?.status==="late"?"selected":""}>Late</option><option value="leave" ${saved?.status==="leave"?"selected":""}>Leave</option></select></label>`;
+            }).join("")}
+            ${students.length ? `<button class="portal-primary" type="submit">Save today's attendance</button>` : ""}
+            <p id="attendanceError" class="portal-error"></p><p id="attendanceSuccess" class="portal-muted"></p>
+          </form>
+          <p class="portal-muted">Today's records saved: ${attendanceRows.length}</p>
+        </section>
         <section class="portal-panel"><h2>${isAdmin ? "Recent homework" : "Saved homework"}</h2><div class="portal-list">${homework.length ? homework.map(h=>`<article><div><b>${escapeHtml(h.class_name)} · ${escapeHtml(h.subject)}</b><p>${escapeHtml(h.details)}</p></div><small>${new Date(h.created_at).toLocaleDateString()}</small></article>`).join("") : `<p class="portal-muted">No homework posted yet.</p>`}</div></section>
       </div>
     </main>`;
+
+  document.querySelectorAll("[data-approve-registration]").forEach(btn=>btn.addEventListener("click",async()=>{btn.disabled=true;const {error}=await supabase.rpc("approve_staff_registration",{request_id:btn.dataset.approveRegistration});if(error){alert(error.message);btn.disabled=false;}else await renderPortal();}));
+  document.querySelectorAll("[data-reject-registration]").forEach(btn=>btn.addEventListener("click",async()=>{btn.disabled=true;const {error}=await supabase.rpc("reject_staff_registration",{request_id:btn.dataset.rejectRegistration});if(error){alert(error.message);btn.disabled=false;}else await renderPortal();}));
+
+  if (document.querySelector("#studentForm")) {
+    document.querySelector("#studentForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = event.currentTarget.querySelector("button");
+      const errorBox = document.querySelector("#studentError");
+      button.disabled = true; errorBox.textContent = "";
+      const payload = {
+        admission_no: document.querySelector("#studentAdmission").value.trim(),
+        full_name: document.querySelector("#studentName").value.trim(),
+        standard: document.querySelector("#studentStandard").value.trim(),
+        stream: document.querySelector("#studentStandard").value === "9" || document.querySelector("#studentStandard").value === "10" ? "General" : document.querySelector("#studentStream").value,
+        division: document.querySelector("#studentDivision").value.trim() || "A",
+        roll_no: document.querySelector("#studentRoll").value ? Number(document.querySelector("#studentRoll").value) : null,
+        guardian_name: document.querySelector("#guardianName").value.trim(),
+        guardian_phone: document.querySelector("#guardianPhone").value.trim()
+      };
+      if (!payload.guardian_name || !payload.guardian_phone) {
+        errorBox.textContent = "Please enter guardian name and phone number.";
+        button.disabled = false;
+        return;
+      }
+      const { error } = await supabase.from("students").insert(payload);
+      if (error) { errorBox.textContent = error.message; button.disabled = false; }
+      else await renderPortal();
+    });
+    const csvEscape = value => `"${String(value ?? "").replaceAll('"','""')}"`;
+    const templateHeaders = ["admission_no","full_name","division","roll_no","guardian_name","guardian_phone"];
+    document.querySelector("#downloadStudentTemplate")?.addEventListener("click", () => {
+      const sample = [templateHeaders.join(","), ["GR001","Student Name","A","1","Parent Name","9999999999"].map(csvEscape).join(",")].join("\r\n");
+      const url = URL.createObjectURL(new Blob(["\uFEFF" + sample], {type:"text/csv;charset=utf-8"}));
+      const a = document.createElement("a"); a.href=url; a.download="student-upload-template.csv"; a.click(); URL.revokeObjectURL(url);
+    });
+    const parseCSV = text => {
+      const rows=[]; let row=[], cell="", quoted=false;
+      for(let i=0;i<text.length;i++){ const c=text[i];
+        if(c==='"' && quoted && text[i+1]==='"'){cell+='"';i++;}
+        else if(c==='"') quoted=!quoted;
+        else if(c===',' && !quoted){row.push(cell.trim());cell="";}
+        else if((c==='\n'||c==='\r') && !quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell.trim());if(row.some(x=>x!==""))rows.push(row);row=[];cell="";}
+        else cell+=c;
+      }
+      if(cell.length||row.length){row.push(cell.trim());if(row.some(x=>x!==""))rows.push(row);}
+      return rows;
+    };
+    let bulkRows=[];
+    document.querySelector("#previewStudentUpload")?.addEventListener("click", async () => {
+      const status=document.querySelector("#bulkStudentStatus"), preview=document.querySelector("#bulkStudentPreview"), file=document.querySelector("#bulkStudentFile").files[0];
+      const standard=document.querySelector("#bulkStandard").value, stream=(standard==="9"||standard==="10")?"General":document.querySelector("#bulkStream").value;
+      document.querySelector("#confirmStudentUpload").hidden=true; bulkRows=[];
+      if(!file){status.textContent="Please select a CSV file first.";return;}
+      const rows=parseCSV((await file.text()).replace(/^\uFEFF/,""));
+      if(rows.length<2){status.textContent="CSV has no student rows.";return;}
+      const normalizeHeader = h => String(h || "").toLowerCase().trim()
+        .replace(/[\\s-]+/g, "_").replace(/[^a-z0-9_]/g, "").replace(/_+/g, "_");
+      const headers=rows[0].map(normalizeHeader);
+      const aliases = {
+        admission_no: ["admission_no","gr_no","gr_number","gr"],
+        full_name: ["full_name","student_name","name"],
+        division: ["division","class_division"],
+        roll_no: ["roll_no","roll_number","roll"],
+        guardian_name: ["guardian_name","guardian","parent_name","father_name","mother_name"],
+        guardian_phone: ["guardian_phone","guardian_mobile","parent_phone","parent_mobile","guardian_contact","parent_contact"]
+      };
+      const index = {};
+      for (const [field, names] of Object.entries(aliases)) {
+        const found = names.find(name => headers.includes(name));
+        if (found !== undefined) index[field] = headers.indexOf(found);
+      }
+      const required=["admission_no","full_name","division","roll_no","guardian_name","guardian_phone"];
+      const missing=required.filter(h=>index[h]===undefined);
+      if(missing.length){status.textContent="Missing CSV columns: "+missing.join(", ")+". Please use the downloaded template.";return;}
+      const seen=new Set(); const invalid=[];
+      bulkRows=rows.slice(1).map((r,i)=>({
+        admission_no:(r[index.admission_no]||"").trim(), full_name:(r[index.full_name]||"").trim(),
+        standard, stream, division:(r[index.division]||"A").trim()||"A",
+        roll_no:(r[index.roll_no]||"").trim()?Number(r[index.roll_no]):null,
+        guardian_name:(r[index.guardian_name]||"").trim(),
+        guardian_phone:(r[index.guardian_phone]||"").trim()
+      })).filter(x=>x.admission_no||x.full_name);
+      bulkRows.forEach((r,i)=>{
+        if(!r.admission_no||!r.full_name||(r.roll_no!==null&&(!Number.isInteger(r.roll_no)||r.roll_no<1))) invalid.push(`Row ${i+2}: check GR number, name and roll number`);
+        if(!r.guardian_name||!r.guardian_phone) invalid.push(`Row ${i+2}: guardian name and phone are required`);
+        if(seen.has(r.admission_no)) invalid.push(`Row ${i+2}: duplicate GR ${r.admission_no} in file`);
+        seen.add(r.admission_no);
+      });
+      if(invalid.length){bulkRows=[];status.textContent=invalid.slice(0,8).join(" | ");return;}
+      const ids=bulkRows.map(r=>r.admission_no);
+      const {data:existing,error}=await supabase.from("students").select("admission_no").in("admission_no",ids);
+      if(error){bulkRows=[];status.textContent=error.message;return;}
+      const duplicates=new Set((existing||[]).map(x=>x.admission_no));
+      bulkRows=bulkRows.filter(r=>!duplicates.has(r.admission_no));
+      status.textContent=`Preview: ${bulkRows.length} new students. ${(ids.length-bulkRows.length)} duplicate GR records will be skipped.`;
+      preview.innerHTML=bulkRows.length?`<div class="portal-list">${bulkRows.slice(0,12).map(r=>`<article><div><b>${escapeHtml(r.full_name)}</b><p>GR ${escapeHtml(r.admission_no)} · Std ${r.standard} ${escapeHtml(r.stream)} · ${escapeHtml(r.division)} · Roll ${r.roll_no??"—"}</p><small>Guardian: ${escapeHtml(r.guardian_name)} · Phone: ${escapeHtml(r.guardian_phone)}</small></div></article>`).join("")}</div>${bulkRows.length>12?`<p class="portal-muted">Showing first 12 of ${bulkRows.length} students.</p>`:""}`:"<p class=\"portal-muted\">No new students to upload.</p>";
+      document.querySelector("#confirmStudentUpload").hidden=!bulkRows.length;
+    });
+    document.querySelector("#confirmStudentUpload")?.addEventListener("click", async event=>{
+      const button=event.currentTarget, status=document.querySelector("#bulkStudentStatus"); if(!bulkRows.length)return;
+      button.disabled=true; status.textContent="Uploading students…";
+      const {error}=await supabase.from("students").insert(bulkRows);
+      if(error){status.textContent="Upload failed: "+error.message;button.disabled=false;}
+      else {status.textContent=`Successfully uploaded ${bulkRows.length} students.`;await renderPortal();}
+    });
+    document.querySelector("#studentSearch")?.addEventListener("input", event => {
+      const q=event.target.value.trim().toLowerCase();
+      document.querySelectorAll("[data-student-row]").forEach(row=>row.hidden=!row.dataset.search.includes(q));
+    });
+    document.querySelectorAll("[data-edit-student]").forEach(button=>button.addEventListener("click", async()=>{
+      const st=students.find(x=>String(x.id)===button.dataset.editStudent); if(!st)return;
+      const full_name=prompt("Student full name:",st.full_name); if(full_name===null)return;
+      const standard=prompt("Standard (9, 10, 11, 12):",st.standard); if(standard===null)return;
+      if(!["9","10","11","12"].includes(standard.trim())){alert("Please enter standard 9, 10, 11 or 12.");return;}
+      const division=prompt("Division:",st.division||"A"); if(division===null)return;
+      const roll=prompt("Roll number:",st.roll_no??""); if(roll===null)return;
+      const guardian_name=prompt("Guardian name:",st.guardian_name||""); if(guardian_name===null)return;
+      const guardian_phone=prompt("Guardian phone:",st.guardian_phone||""); if(guardian_phone===null)return;
+      const photo_url=prompt("Student photo URL (optional; leave blank for no photo):",st.photo_url||""); if(photo_url===null)return;
+      const stream=standard==="9"||standard==="10"?"General":(prompt("Stream (Science, Commerce, Arts):",st.stream||"Science")||st.stream);
+      const {error}=await supabase.from("students").update({full_name:full_name.trim(),standard,stream,division:division.trim()||"A",roll_no:roll.trim()?Number(roll):null,guardian_name:guardian_name.trim()||null,guardian_phone:guardian_phone.trim()||null,photo_url:photo_url.trim()||null}).eq("id",st.id);
+      if(error)alert(error.message);else await renderPortal();
+    }));
+    document.querySelectorAll("[data-id-card]").forEach(button=>button.addEventListener("click",()=>{
+      const st=students.find(x=>String(x.id)===button.dataset.idCard);if(!st)return;
+      const w=window.open("","_blank","width=700,height=500");if(!w){alert("Please allow pop-ups to print the ID card.");return;}
+      const photo=st.photo_url?`<img src="${escapeHtml(st.photo_url)}" class="photo">`:`<div class="photo placeholder">PHOTO</div>`;
+      w.document.write(`<!doctype html><html><head><title>Student ID Card</title><style>body{font-family:Arial;padding:24px}.card{width:340px;border:2px solid #174b78;border-radius:14px;padding:16px;text-align:center;color:#17385b}.head{font-weight:bold;font-size:18px}.sub{font-size:12px;margin:5px}.photo{width:90px;height:100px;object-fit:cover;margin:12px auto;border:1px solid #bbb}.placeholder{display:flex;align-items:center;justify-content:center;margin:12px auto;background:#eee}.details{text-align:left;font-size:13px;line-height:1.8}</style></head><body><div class="card"><div class="head">Government Secondary School</div><div class="sub">Bildi, Gujarat</div>${photo}<h3>${escapeHtml(st.full_name)}</h3><div class="details"><b>GR No:</b> ${escapeHtml(st.admission_no)}<br><b>Standard:</b> ${escapeHtml(st.standard)} ${escapeHtml(st.stream||"")}<br><b>Division:</b> ${escapeHtml(st.division||"A")}<br><b>Roll No:</b> ${st.roll_no??"—"}</div></div><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close();
+    }));
+    document.querySelectorAll("[data-delete-student]").forEach(button => button.addEventListener("click", async () => {
+      if (!confirm("Delete this student and related attendance/results/fees?")) return;
+      const { error } = await supabase.from("students").delete().eq("id", Number(button.dataset.deleteStudent));
+      if (error) alert(error.message); else await renderPortal();
+    }));
+  }
+
+  const marksForm=document.querySelector("#examMarksForm");
+  const resetMarksForm=()=>{marksForm?.reset();document.querySelector("#markEditId").value="";document.querySelector("#markYear").value="2026-27";document.querySelector("#markMaximum").value="100";document.querySelector("#saveMarksBtn").textContent="Save marks";document.querySelector("#cancelMarksEdit").hidden=true;};
+  marksForm?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const btn=document.querySelector("#saveMarksBtn"), errorBox=document.querySelector("#marksError");
+    btn.disabled=true;errorBox.textContent="";
+    const studentId=Number(document.querySelector("#markStudent").value);
+    const obtained=Number(document.querySelector("#markObtained").value), maximum=Number(document.querySelector("#markMaximum").value);
+    if(!studentId||!Number.isFinite(obtained)||!Number.isFinite(maximum)||maximum<=0||obtained<0||obtained>maximum){errorBox.textContent="Select a student and enter valid marks (obtained marks cannot exceed maximum marks).";btn.disabled=false;return;}
+    const payload={student_id:studentId,academic_year:document.querySelector("#markYear").value.trim(),exam_name:document.querySelector("#markExam").value.trim(),subject:document.querySelector("#markSubject").value.trim(),marks_obtained:obtained,max_marks:maximum,remarks:document.querySelector("#markRemarks").value.trim()||null,created_by:session.user.id};
+    const editId=document.querySelector("#markEditId").value;
+    const result=editId?await supabase.from("exam_marks").update(payload).eq("id",Number(editId)):await supabase.from("exam_marks").insert(payload);
+    if(result.error){errorBox.textContent=result.error.message;btn.disabled=false;return;}
+    await renderPortal();
+  });
+  document.querySelector("#cancelMarksEdit")?.addEventListener("click",resetMarksForm);
+  document.querySelectorAll("[data-edit-mark]").forEach(btn=>btn.addEventListener("click",()=>{
+    const m=examMarks.find(x=>String(x.id)===btn.dataset.editMark);if(!m)return;
+    document.querySelector("#markEditId").value=m.id;document.querySelector("#markStudent").value=m.student_id;document.querySelector("#markYear").value=m.academic_year;document.querySelector("#markExam").value=m.exam_name;document.querySelector("#markSubject").value=m.subject;document.querySelector("#markObtained").value=m.marks_obtained;document.querySelector("#markMaximum").value=m.max_marks;document.querySelector("#markRemarks").value=m.remarks||"";document.querySelector("#saveMarksBtn").textContent="Update marks";document.querySelector("#cancelMarksEdit").hidden=false;document.querySelector("#examMarksPanel").scrollIntoView({behavior:"smooth"});
+  }));
+  document.querySelectorAll("[data-delete-mark]").forEach(btn=>btn.addEventListener("click",async()=>{
+    if(!confirm("Delete this examination mark record?"))return;
+    const {error}=await supabase.from("exam_marks").delete().eq("id",Number(btn.dataset.deleteMark));if(error)alert(error.message);else await renderPortal();
+  }));
+  const applyMarksFilter=()=>{
+    const std=document.querySelector("#marksFilterStandard")?.value||"", exam=(document.querySelector("#marksFilterExam")?.value||"").toLowerCase();
+    document.querySelectorAll("[data-mark-row]").forEach(row=>{const text=row.textContent.toLowerCase();const standardMatch=!std||text.includes(`std ${std}`);row.hidden=!(standardMatch&&text.includes(exam));});
+  };
+  document.querySelector("#marksFilterStandard")?.addEventListener("change",applyMarksFilter);
+  document.querySelector("#marksFilterExam")?.addEventListener("input",applyMarksFilter);
+  document.querySelector("#downloadMarksCsv")?.addEventListener("click",()=>{
+    const rows=[["Academic Year","Exam","Standard","GR No","Student Name","Division","Roll No","Subject","Marks Obtained","Maximum Marks","Percentage","Remarks"]];
+    examMarks.forEach(m=>{const st=students.find(x=>String(x.id)===String(m.student_id));if(!st)return;const std=document.querySelector("#marksFilterStandard").value,ex=document.querySelector("#marksFilterExam").value.toLowerCase();if(std&&String(st.standard)!==std)return;if(ex&&!m.exam_name.toLowerCase().includes(ex))return;rows.push([m.academic_year,m.exam_name,st.standard,st.admission_no,st.full_name,st.division||"A",st.roll_no??"",m.subject,m.marks_obtained,m.max_marks,(m.marks_obtained/m.max_marks*100).toFixed(2),m.remarks||""]);});
+    const csv=rows.map(row=>row.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(",")).join("\r\n");
+    const url=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"}));const a=document.createElement("a");a.href=url;a.download="school-examination-marks.csv";a.click();URL.revokeObjectURL(url);
+  });
+
+  let generatedResultRows = [];
+  const csvDownload = (rows, filename) => {
+    const csv = rows.map(row => row.map(v => `"${String(v ?? "").replaceAll('"','""')}"`).join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a"); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
+  };
+  const generateResultReport = () => {
+    const standard = document.querySelector("#resultStandard").value;
+    const year = document.querySelector("#resultYear").value.trim();
+    const exam = document.querySelector("#resultExam").value.trim();
+    const passPercent = Number(document.querySelector("#resultPassMark").value);
+    const message = document.querySelector("#resultReportMessage");
+    const list = document.querySelector("#resultReportList");
+    generatedResultRows = [];
+    document.querySelector("#downloadResultCsv").disabled = true;
+    document.querySelector("#downloadTop10Csv").disabled = true;
+    if (!standard || !year || !exam || !Number.isFinite(passPercent) || passPercent < 0 || passPercent > 100) {
+      message.textContent = "Please select standard, enter academic year and exact exam name, and set pass percentage from 0 to 100.";
+      list.innerHTML = ""; return;
+    }
+    const filtered = examMarks.filter(m => m.academic_year === year && m.exam_name.toLowerCase() === exam.toLowerCase())
+      .map(m => ({ mark:m, student:students.find(st => String(st.id) === String(m.student_id)) }))
+      .filter(x => x.student && String(x.student.standard) === standard);
+    if (!filtered.length) { message.textContent = "No marks found for this standard, academic year and exam."; list.innerHTML = ""; return; }
+    const grouped = new Map();
+    filtered.forEach(({mark,student}) => {
+      if (!grouped.has(String(student.id))) grouped.set(String(student.id), {student, subjects:[], obtained:0, maximum:0, passed:true});
+      const row = grouped.get(String(student.id));
+      const obtained = Number(mark.marks_obtained), maximum = Number(mark.max_marks);
+      const subjectPercent = maximum > 0 ? obtained / maximum * 100 : 0;
+      row.subjects.push({subject:mark.subject, obtained, maximum, percentage:subjectPercent});
+      row.obtained += obtained; row.maximum += maximum;
+      if (subjectPercent < passPercent) row.passed = false;
+    });
+    generatedResultRows = [...grouped.values()].map(row => ({
+      student:row.student, subjects:row.subjects, obtained:row.obtained, maximum:row.maximum,
+      percentage:row.maximum ? row.obtained / row.maximum * 100 : 0,
+      result:row.passed ? "PASS" : "FAIL"
+    })).sort((a,b) => b.percentage-a.percentage || String(a.student.full_name).localeCompare(String(b.student.full_name)));
+    generatedResultRows.forEach((r,i) => r.rank = i+1);
+    const passCount = generatedResultRows.filter(r=>r.result==="PASS").length;
+    message.textContent = `${generatedResultRows.length} students · ${passCount} PASS · ${generatedResultRows.length-passCount} FAIL · Pass mark ${passPercent}%`;
+    list.innerHTML = `<div class="result-table-wrap"><table class="result-table"><thead><tr><th>Rank</th><th>GR No.</th><th>Student</th><th>Roll</th><th>Total</th><th>Out of</th><th>Percentage</th><th>Result</th><th>Subject details</th></tr></thead><tbody>${generatedResultRows.map(r=>`<tr><td>${r.rank}</td><td>${escapeHtml(r.student.admission_no)}</td><td>${escapeHtml(r.student.full_name)}</td><td>${escapeHtml(r.student.roll_no ?? "—")}</td><td>${r.obtained.toFixed(2)}</td><td>${r.maximum.toFixed(2)}</td><td>${r.percentage.toFixed(2)}%</td><td><strong class="${r.result==="PASS"?"result-pass":"result-fail"}">${r.result}</strong></td><td>${r.subjects.map(x=>`${escapeHtml(x.subject)}: ${x.obtained}/${x.maximum} (${x.percentage.toFixed(1)}%)`).join("<br>")}</td></tr>`).join("")}</tbody></table></div>`;
+    document.querySelector("#downloadResultCsv").disabled = false;
+    document.querySelector("#downloadTop10Csv").disabled = false;
+  };
+  document.querySelector("#generateResult")?.addEventListener("click", generateResultReport);
+  document.querySelector("#downloadResultCsv")?.addEventListener("click", () => {
+    if (!generatedResultRows.length) return;
+    const rows=[["Rank","Academic Year","Exam","Standard","GR No","Student Name","Division","Roll No","Total Obtained","Total Maximum","Percentage","Result","Subject Details"]];
+    generatedResultRows.forEach(r=>rows.push([r.rank,document.querySelector("#resultYear").value,document.querySelector("#resultExam").value,document.querySelector("#resultStandard").value,r.student.admission_no,r.student.full_name,r.student.division||"A",r.student.roll_no??"",r.obtained.toFixed(2),r.maximum.toFixed(2),r.percentage.toFixed(2),r.result,r.subjects.map(x=>`${x.subject}: ${x.obtained}/${x.maximum}`).join("; ")]));
+    csvDownload(rows,"student-exam-results.csv");
+  });
+  document.querySelector("#downloadTop10Csv")?.addEventListener("click", () => {
+    if (!generatedResultRows.length) return;
+    const rows=[["Rank","GR No","Student Name","Standard","Total Obtained","Total Maximum","Percentage","Result"]];
+    generatedResultRows.slice(0,10).forEach(r=>rows.push([r.rank,r.student.admission_no,r.student.full_name,document.querySelector("#resultStandard").value,r.obtained.toFixed(2),r.maximum.toFixed(2),r.percentage.toFixed(2),r.result]));
+    csvDownload(rows,"student-top-10-ranking.csv");
+  });
+
+  document.querySelector("#attendanceForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector("button[type=submit]");
+    if (!button) return;
+    button.disabled = true;
+    const records = students.filter(st=>st.status==="active").map(st => ({
+      student_id: st.id,
+      attendance_date: today,
+      status: event.currentTarget.elements[`attendance-${st.id}`]?.value || "present",
+      marked_by: session.user.id
+    }));
+    const { error } = records.length ? await supabase.from("attendance").upsert(records, { onConflict: "student_id,attendance_date" }) : { error: null };
+    if (error) { document.querySelector("#attendanceError").textContent = error.message; button.disabled = false; }
+    else { document.querySelector("#attendanceSuccess").textContent = "Attendance saved successfully."; button.disabled = false; }
+  });
 
   document.querySelector("#logoutBtn").addEventListener("click", async () => {
     await supabase.auth.signOut();
     await renderPortal();
   });
+
+  document.querySelector("#galleryUploadForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const form=event.currentTarget; const button=form.querySelector("button[type=submit]"); const errorBox=document.querySelector("#galleryUploadError");
+    const file=document.querySelector("#galleryFile").files[0]; errorBox.textContent="";
+    if (!file) return; if (file.size > 5*1024*1024) { errorBox.textContent="Maximum photo size is 5 MB."; return; }
+    if (!['image/jpeg','image/png','image/webp'].includes(file.type)) { errorBox.textContent="Choose JPG, PNG or WEBP image."; return; }
+    button.disabled=true;
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      const currentUser = authData?.user;
+      if (authError || !currentUser) throw new Error("Login session expired. Please logout and login again.");
+
+      const ext = file.name.split(".").pop().toLowerCase();
+      const path = `${currentUser.id}/${crypto.randomUUID()}.${ext}`;
+      const { error: storageError } = await supabase.storage
+        .from("school-gallery")
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (storageError) {
+        throw new Error(`Photo Storage permission error: ${storageError.message}. Check storage.objects INSERT policy for school-gallery.`);
+      }
+
+      const { data: publicData } = supabase.storage.from("school-gallery").getPublicUrl(path);
+      const { error: rowError } = await supabase.from("gallery_items").insert({
+        title: document.querySelector("#galleryTitle").value.trim(),
+        caption: document.querySelector("#galleryCaption").value.trim(),
+        image_url: publicData.publicUrl,
+        is_published: true,
+        created_by: currentUser.id
+      });
+      if (rowError) {
+        await supabase.storage.from("school-gallery").remove([path]);
+        throw new Error(`Gallery record permission error: ${rowError.message}. Run supabase/gallery-media-upgrade.sql in the connected Supabase project.`);
+      }
+      await renderPortal();
+    } catch (uploadError) {
+      errorBox.textContent = uploadError?.message || "Photo upload failed. Please try again.";
+      button.disabled = false;
+    }
+  });
+  document.querySelectorAll("[data-edit-gallery]").forEach(btn=>btn.addEventListener("click",async()=>{const item=galleryItems.find(g=>g.id===Number(btn.dataset.editGallery));if(!item)return;const title=prompt("Edit photo title",item.title);if(title===null)return;const caption=prompt("Edit caption",item.caption||"");if(caption===null)return;const {error}=await supabase.from("gallery_items").update({title:title.trim(),caption:caption.trim()}).eq("id",item.id).eq("created_by",session.user.id);if(error)alert(error.message);else await renderPortal();}));
+  document.querySelectorAll("[data-delete-gallery]").forEach(btn=>btn.addEventListener("click",async()=>{if(!confirm("Delete this photo from the website?"))return;const url=decodeURIComponent(btn.dataset.imageUrl);const marker="/storage/v1/object/public/school-gallery/";const path=url.split(marker)[1];const {error}=await supabase.from("gallery_items").delete().eq("id",Number(btn.dataset.deleteGallery)).eq("created_by",session.user.id);if(error){alert(error.message);return;}if(path)await supabase.storage.from("school-gallery").remove([decodeURIComponent(path)]);await renderPortal();}));
 
   if (isAdmin) {
     document.querySelector("#noticeForm").addEventListener("submit", async (event) => {

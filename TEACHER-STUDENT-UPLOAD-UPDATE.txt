@@ -1,0 +1,15 @@
+TEACHER STUDENT UPLOAD UPDATE
+
+What changed:
+- Student Add form is now visible to both Principal/Admin and Teacher accounts.
+- Teacher accounts can INSERT new students in Supabase.
+- Student deletion remains Admin-only.
+
+IMPORTANT: Apply the updated database permission in Supabase:
+1. Open Supabase Dashboard > SQL Editor.
+2. Open supabase/school-management-schema.sql from this project.
+3. Run the full schema SQL. This uses CREATE TABLE IF NOT EXISTS and refreshes the listed policies.
+4. Refresh the website and sign in as Teacher to add a student.
+
+The signed-in user's public.profiles.role must be exactly 'teacher' or 'admin'.
+Do not share your Supabase secret/service_role key.

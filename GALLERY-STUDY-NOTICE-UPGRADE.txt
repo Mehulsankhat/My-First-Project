@@ -1,0 +1,29 @@
+MENU 3, 4, 5 UPGRADE
+
+Menu 3 - Notices:
+- Public website reads the latest notices from the existing Supabase notices table.
+
+Menu 4 - Study:
+- Public website now displays recent class-wise homework/study posts from the existing homework table.
+
+Menu 5 - Gallery:
+- Signed-in staff can upload JPG, PNG or WEBP photos (maximum 5 MB).
+- Uploaded photos are published on the public website automatically.
+- The uploading account can edit the photo title/caption and delete its own photo.
+- Existing gallery records are preserved.
+
+IMPORTANT SUPABASE SETUP:
+1. Open Supabase Dashboard > SQL Editor.
+2. Run supabase/gallery-media-upgrade.sql.
+3. This creates/configures the public school-gallery Storage bucket and ownership-based policies.
+4. Existing records are not deleted.
+
+RUN LOCALLY:
+- Extract the ZIP.
+- Open the inner School-Management-App-Supabase-Fixed folder (the one containing package.json).
+- Copy your previous .env file into this folder. Do not share its keys.
+- Run: npm install
+- Run: npm run dev
+
+Deploy:
+- Run npm run build and deploy the generated dist folder to Netlify.
