@@ -1,0 +1,1 @@
+CSV upload fix: BOM-safe and whitespace-safe header normalization, semicolon CSV detection, and diagnostic detected headers. Use npm install then npm run dev from this folder. Existing database records are unchanged. Copy your existing .env to this folder; never commit .env to GitHub.

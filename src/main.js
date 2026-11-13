@@ -682,10 +682,14 @@ async function renderPortal() {
       const standard=document.querySelector("#bulkStandard").value, stream=(standard==="9"||standard==="10")?"General":document.querySelector("#bulkStream").value;
       document.querySelector("#confirmStudentUpload").hidden=true; bulkRows=[];
       if(!file){status.textContent="Please select a CSV file first.";return;}
-      const rows=parseCSV((await file.text()).replace(/^\uFEFF/,""));
+      // Handle UTF-8 BOM, Excel CSV exports, and optional semicolon delimiters.
+      const csvText=(await file.text()).replace(/^\uFEFF/,"");
+      const firstLine=csvText.split(/\r?\n/,1)[0];
+      const delimiter=firstLine.includes(";") && !firstLine.includes(",") ? ";" : ",";
+      const rows=parseCSV(delimiter===";" ? csvText.replace(/;/g,",") : csvText);
       if(rows.length<2){status.textContent="CSV has no student rows.";return;}
-      const normalizeHeader = h => String(h || "").toLowerCase().trim()
-        .replace(/[\\s-]+/g, "_").replace(/[^a-z0-9_]/g, "").replace(/_+/g, "_");
+      const normalizeHeader = h => String(h ?? "").replace(/\uFEFF/g,"").normalize("NFKC")
+        .toLowerCase().trim().replace(/[\s-]+/g,"_").replace(/[^a-z0-9_]/g,"").replace(/_+/g,"_");
       const headers=rows[0].map(normalizeHeader);
       const aliases = {
         admission_no: ["admission_no","gr_no","gr_number","gr"],
@@ -702,7 +706,7 @@ async function renderPortal() {
       }
       const required=["admission_no","full_name","division","roll_no","guardian_name","guardian_phone"];
       const missing=required.filter(h=>index[h]===undefined);
-      if(missing.length){status.textContent="Missing CSV columns: "+missing.join(", ")+". Please use the downloaded template.";return;}
+      if(missing.length){status.textContent="Missing CSV columns: "+missing.join(", ")+". Detected headers: "+(headers.join(", ")||"(none)")+". Please use the downloaded template.";return;}
       const seen=new Set(); const invalid=[];
       bulkRows=rows.slice(1).map((r,i)=>({
         admission_no:(r[index.admission_no]||"").trim(), full_name:(r[index.full_name]||"").trim(),
