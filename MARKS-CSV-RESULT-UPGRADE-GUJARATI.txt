@@ -1,0 +1,18 @@
+MARKS CSV + GUJARATI RESULT UPGRADE
+
+1. Copy your existing .env file to this folder (beside package.json).
+2. npm install
+3. npm run dev
+4. Staff Portal > Examination & Marks Management.
+5. Choose Standard, optional Division, Academic Year, exact Exam name, Subjects and Maximum marks.
+6. Click Download Students + Marks CSV Template. Every existing student in that class is prefilled, including Student ID, GR Number, name, standard, division, roll number. Previously saved subject marks are also prefilled.
+7. In Excel, fill only the Obtained columns. Keep identifiers and headings unchanged. Save as CSV UTF-8.
+8. Upload CSV > Preview / Validate Marks CSV > Save Validated Marks.
+9. Invalid student identifiers, changed names, wrong exam/year, duplicate rows, nonnumeric marks and out-of-range marks are rejected before saving.
+10. Existing marks for the same Student ID + Year + Exam + Subject are updated (upsert), not duplicated. Empty obtained marks are skipped.
+11. Automatic Result > select same Standard, Year, Exam > Generate Result > Print / Save PDF. PDF includes student photo, school logo watermark, subject table, rank, Gujarati headings and signature spaces.
+12. Print dialog: enable Background graphics for colors.
+
+No new SQL is required if your existing public.exam_marks table and policies from supabase/exam-marks-management.sql are already installed. No existing students/marks are deleted by this upgrade.
+
+NOTE: Rank uses available marks for the selected standard/year/exam. For fair rankings ensure every student's subjects are complete. Signed student photo URLs require existing student-photos storage permissions.

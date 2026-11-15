@@ -511,6 +511,13 @@ async function renderPortal() {
   const notices = noticeResult.data || [];
   const homework = homeworkResult.data || [];
   const students = studentResult.data || [];
+  // Student images are private; issue short-lived signed URLs only for signed-in staff.
+  const studentPhotoUrls = {};
+  await Promise.all(students.filter(st => st.photo_url).map(async st => {
+    const { data, error } = await supabase.storage.from("student-photos")
+      .createSignedUrl(st.photo_url, 3600);
+    if (!error && data?.signedUrl) studentPhotoUrls[st.id] = data.signedUrl;
+  }));
   const examMarks = marksResult.data || [];
   const galleryItems = galleryResult.data || [];
   const today = new Date().toLocaleDateString("en-CA");
@@ -561,7 +568,18 @@ async function renderPortal() {
           <div class="portal-form portal-inline-form">
             <label>Filter standard<select id="marksFilterStandard"><option value="">All standards</option>${["9","10","11","12"].map(v=>`<option value="${v}">Std ${v}</option>`).join("")}</select></label>
             <label>Filter exam<input id="marksFilterExam" placeholder="Search exam name" /></label>
-            <button class="portal-primary" type="button" id="downloadMarksCsv">Download marks (Excel CSV)</button>
+            <label>Division<select id="marksFilterDivision"><option value="">All divisions</option>${[...new Set(students.map(st=>st.division||"A"))].sort().map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("")}</select></label>
+            <label>Academic year<input id="marksBulkYear" value="2026-27" maxlength="12" /></label>
+            <label>Exact exam name<input id="marksBulkExam" placeholder="e.g. First Exam" maxlength="80" /></label>
+            <label>Subjects (comma separated)<input id="marksBulkSubjects" value="ગુજરાતી,અંગ્રેજી,હિન્દી,સંસ્કૃત,ગણિત,વિજ્ઞાન,સામાજિક વિજ્ઞાન" /></label>
+            <label>Maximum marks per subject<input id="marksBulkMaximum" type="number" value="50" min="1" step="0.01" /></label>
+            <button class="portal-primary" type="button" id="downloadPrefilledMarksCsv">Download Students + Marks CSV Template</button>
+            <label>Upload filled marks CSV<input id="marksBulkFile" type="file" accept=".csv,text/csv" /></label>
+            <button class="portal-primary" type="button" id="previewMarksCsv">Preview / Validate Marks CSV</button>
+            <button class="portal-primary" type="button" id="saveMarksCsv" disabled>Save Validated Marks</button>
+            <p class="portal-muted" id="marksBulkStatus" aria-live="polite">Download a CSV with existing students. Fill marks only; do not change student identifiers.</p>
+            <div id="marksBulkPreview" class="result-table-wrap"></div>
+            <button class="portal-primary" type="button" id="downloadMarksCsv">Download existing marks (Excel CSV)</button>
           </div>
           <div class="portal-list" id="examMarksList">${examMarks.length ? examMarks.map(m=>{const st=students.find(x=>String(x.id)===String(m.student_id));return `<article data-mark-row><div><b>${escapeHtml(st?.full_name||"Unknown student")} · ${escapeHtml(m.subject)}</b><p>GR ${escapeHtml(st?.admission_no||"—")} · Std ${escapeHtml(st?.standard||"—")} · ${escapeHtml(m.exam_name)} · ${escapeHtml(m.academic_year)}</p><small>${m.marks_obtained} / ${m.max_marks}${m.remarks?` · ${escapeHtml(m.remarks)}`:""}</small></div><div class="student-actions"><button type="button" class="portal-primary" data-edit-mark="${m.id}">Edit</button><button type="button" class="portal-delete" data-delete-mark="${m.id}">Delete</button></div></article>`}).join("") : `<p class="portal-muted">No marks added yet.</p>`}</div>
           <section class="result-report-panel" id="resultReportPanel">
@@ -592,6 +610,7 @@ async function renderPortal() {
             <label>Roll No.<input id="studentRoll" type="number" min="1" /></label>
             <label>Guardian name<input id="guardianName" required maxlength="120" placeholder="Enter parent / guardian name" /></label>
             <label>Guardian phone<input id="guardianPhone" type="tel" required maxlength="20" placeholder="Enter guardian mobile number" /></label>
+            <label>Student photo (optional; JPG, PNG, WebP, max 3 MB)<input id="studentPhotoFile" type="file" accept="image/jpeg,image/png,image/webp" /></label>
             <button class="portal-primary" type="submit">Add student</button><p id="studentError" class="portal-error"></p>
           </form>`}
           <section class="portal-bulk-upload">
@@ -609,7 +628,7 @@ async function renderPortal() {
             </div>
           </section>
           <label class="student-search-label">Search students<input id="studentSearch" type="search" placeholder="Search by GR number, name, standard or division..." /></label>
-          <div class="portal-list" id="studentList">${students.length ? students.map(st=>`<article data-student-row data-search="${escapeHtml([st.admission_no,st.full_name,st.standard,st.stream,st.division,st.roll_no].join(" ").toLowerCase())}"><div><b>${escapeHtml(st.full_name)}</b><p>GR: ${escapeHtml(st.admission_no)} · Std ${escapeHtml(st.standard)}${st.stream && st.stream !== "General" ? " · "+escapeHtml(st.stream) : ""}-${escapeHtml(st.division || "A")} · Roll: ${st.roll_no ?? "—"}</p>${(st.guardian_name || st.guardian_phone) ? `<small>Guardian: ${escapeHtml(st.guardian_name || "—")} · Phone: ${escapeHtml(st.guardian_phone || "—")}</small>` : ""}</div><div class="student-actions"> <button type="button" class="portal-primary" data-id-card="${st.id}">Print ID</button>${isAdmin ? `<button type="button" class="portal-primary" data-edit-student="${st.id}">Edit</button><button class="portal-delete" data-delete-student="${st.id}">Delete</button>` : ""}</div></article>`).join("") : `<p class="portal-muted">No students added yet.</p>`}</div>
+          <div class="portal-list" id="studentList">${students.length ? students.map(st=>`<article data-student-row data-search="${escapeHtml([st.admission_no,st.full_name,st.standard,st.stream,st.division,st.roll_no].join(" ").toLowerCase())}"><div class="student-detail-with-photo">${studentPhotoUrls[st.id] ? `<img class="student-profile-photo" src="${escapeHtml(studentPhotoUrls[st.id])}" alt="Photo of ${escapeHtml(st.full_name)}" />` : `<span class="student-profile-placeholder">No photo</span>`}<div><b>${escapeHtml(st.full_name)}</b><p>GR: ${escapeHtml(st.admission_no)} · Std ${escapeHtml(st.standard)}${st.stream && st.stream !== "General" ? " · "+escapeHtml(st.stream) : ""}-${escapeHtml(st.division || "A")} · Roll: ${st.roll_no ?? "—"}</p>${(st.guardian_name || st.guardian_phone) ? `<small>Guardian: ${escapeHtml(st.guardian_name || "—")} · Phone: ${escapeHtml(st.guardian_phone || "—")}</small>` : ""}</div></div><div class="student-actions"> <button type="button" class="portal-primary" data-id-card="${st.id}">Print ID</button>${isAdmin ? `<button type="button" class="portal-primary" data-edit-student="${st.id}">Edit</button><button type="button" class="portal-primary" data-student-photo="${st.id}">${st.photo_url ? "Change Photo" : "Add Photo"}</button>${st.photo_url ? `<button type="button" class="portal-delete" data-remove-student-photo="${st.id}">Remove Photo</button>` : ""}<button class="portal-delete" data-delete-student="${st.id}">Delete</button>` : ""}</div></article>`).join("") : `<p class="portal-muted">No students added yet.</p>`}</div>
         </section>
         <section class="portal-panel">
           <h2>Daily Attendance · ${today}</h2>
@@ -632,6 +651,34 @@ async function renderPortal() {
   document.querySelectorAll("[data-approve-registration]").forEach(btn=>btn.addEventListener("click",async()=>{btn.disabled=true;const {error}=await supabase.rpc("approve_staff_registration",{request_id:btn.dataset.approveRegistration});if(error){alert(error.message);btn.disabled=false;}else await renderPortal();}));
   document.querySelectorAll("[data-reject-registration]").forEach(btn=>btn.addEventListener("click",async()=>{btn.disabled=true;const {error}=await supabase.rpc("reject_staff_registration",{request_id:btn.dataset.rejectRegistration});if(error){alert(error.message);btn.disabled=false;}else await renderPortal();}));
 
+  // Upload to private Storage, then link the path to the student row.
+  const uploadStudentPhoto = async (studentId, file) => {
+    if (!file) return;
+    const allowed = {"image/jpeg":"jpg","image/png":"png","image/webp":"webp"};
+    if (!allowed[file.type] || file.size > 3 * 1024 * 1024 || file.size === 0)
+      throw new Error("Choose a JPG, PNG or WebP photo smaller than 3 MB.");
+    const {data: authData, error: authError} = await supabase.auth.getUser();
+    if (authError || !authData?.user) throw new Error("Please log in again.");
+    const path = `${authData.user.id}/${studentId}/${crypto.randomUUID()}.${allowed[file.type]}`;
+    const uploaded = await supabase.storage.from("student-photos")
+      .upload(path, file, {contentType:file.type, upsert:false});
+    if (uploaded.error) throw uploaded.error;
+    const {data:oldRow,error:readError} = await supabase.from("students")
+      .select("photo_url").eq("id",studentId).single();
+    if (readError) {
+      await supabase.storage.from("student-photos").remove([path]);
+      throw readError;
+    }
+    const updated = await supabase.from("students").update({photo_url:path}).eq("id",studentId).select("id");
+    if (updated.error || !updated.data?.length) {
+      await supabase.storage.from("student-photos").remove([path]);
+      throw updated.error || new Error("Student photo update was not permitted.");
+    }
+    // Old photos may be owned by a different staff member. Do not delete without authorization.
+    if (oldRow?.photo_url && oldRow.photo_url !== path) {
+      await supabase.storage.from("student-photos").remove([oldRow.photo_url]);
+    }
+  };
   if (document.querySelector("#studentForm")) {
     document.querySelector("#studentForm").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -653,9 +700,21 @@ async function renderPortal() {
         button.disabled = false;
         return;
       }
-      const { error } = await supabase.from("students").insert(payload);
+      const photoFile = document.querySelector("#studentPhotoFile").files[0];
+      if (photoFile && (!["image/jpeg","image/png","image/webp"].includes(photoFile.type) || photoFile.size > 3*1024*1024)) {
+        errorBox.textContent = "Select JPG, PNG or WebP photo up to 3 MB."; button.disabled=false; return;
+      }
+      const { data:created, error } = await supabase.from("students").insert(payload).select("id").single();
       if (error) { errorBox.textContent = error.message; button.disabled = false; }
-      else await renderPortal();
+      else {
+        try {
+          if (photoFile) await uploadStudentPhoto(created.id, photoFile);
+          await renderPortal();
+        } catch (e) {
+          errorBox.textContent = "Student saved, but photo upload failed: " + e.message;
+          button.disabled = false;
+        }
+      }
     });
     const csvEscape = value => `"${String(value ?? "").replaceAll('"','""')}"`;
     const templateHeaders = ["admission_no","full_name","division","roll_no","guardian_name","guardian_phone"];
@@ -751,16 +810,54 @@ async function renderPortal() {
       const roll=prompt("Roll number:",st.roll_no??""); if(roll===null)return;
       const guardian_name=prompt("Guardian name:",st.guardian_name||""); if(guardian_name===null)return;
       const guardian_phone=prompt("Guardian phone:",st.guardian_phone||""); if(guardian_phone===null)return;
-      const photo_url=prompt("Student photo URL (optional; leave blank for no photo):",st.photo_url||""); if(photo_url===null)return;
+
       const stream=standard==="9"||standard==="10"?"General":(prompt("Stream (Science, Commerce, Arts):",st.stream||"Science")||st.stream);
-      const {error}=await supabase.from("students").update({full_name:full_name.trim(),standard,stream,division:division.trim()||"A",roll_no:roll.trim()?Number(roll):null,guardian_name:guardian_name.trim()||null,guardian_phone:guardian_phone.trim()||null,photo_url:photo_url.trim()||null}).eq("id",st.id);
+      const {error}=await supabase.from("students").update({full_name:full_name.trim(),standard,stream,division:division.trim()||"A",roll_no:roll.trim()?Number(roll):null,guardian_name:guardian_name.trim()||null,guardian_phone:guardian_phone.trim()||null}).eq("id",st.id);
       if(error)alert(error.message);else await renderPortal();
+    }));
+    document.querySelectorAll("[data-student-photo]").forEach(button => button.addEventListener("click", () => {
+      const id = button.dataset.studentPhoto;
+      const picker = document.createElement("input");
+      picker.type = "file"; picker.accept = "image/jpeg,image/png,image/webp";
+      picker.onchange = async () => {
+        if (!picker.files?.[0]) return;
+        button.disabled = true;
+        try { await uploadStudentPhoto(id, picker.files[0]); await renderPortal(); }
+        catch(e) { alert("Photo upload failed: " + e.message); button.disabled = false; }
+      };
+      picker.click();
+    }));
+    document.querySelectorAll("[data-remove-student-photo]").forEach(button => button.addEventListener("click", async () => {
+      if (!confirm("Remove this student's photo?")) return;
+      const st = students.find(x => String(x.id) === button.dataset.removeStudentPhoto);
+      if (!st) return;
+      button.disabled = true;
+      const result = await supabase.from("students").update({photo_url:null}).eq("id",st.id).select("id");
+      if (result.error || !result.data?.length) {
+        alert(result.error?.message || "Photo removal not permitted."); button.disabled=false; return;
+      }
+      if (st.photo_url) await supabase.storage.from("student-photos").remove([st.photo_url]);
+      await renderPortal();
     }));
     document.querySelectorAll("[data-id-card]").forEach(button=>button.addEventListener("click",()=>{
       const st=students.find(x=>String(x.id)===button.dataset.idCard);if(!st)return;
       const w=window.open("","_blank","width=700,height=500");if(!w){alert("Please allow pop-ups to print the ID card.");return;}
-      const photo=st.photo_url?`<img src="${escapeHtml(st.photo_url)}" class="photo">`:`<div class="photo placeholder">PHOTO</div>`;
-      w.document.write(`<!doctype html><html><head><title>Student ID Card</title><style>body{font-family:Arial;padding:24px}.card{width:340px;border:2px solid #174b78;border-radius:14px;padding:16px;text-align:center;color:#17385b}.head{font-weight:bold;font-size:18px}.sub{font-size:12px;margin:5px}.photo{width:90px;height:100px;object-fit:cover;margin:12px auto;border:1px solid #bbb}.placeholder{display:flex;align-items:center;justify-content:center;margin:12px auto;background:#eee}.details{text-align:left;font-size:13px;line-height:1.8}</style></head><body><div class="card"><div class="head">Government Secondary School</div><div class="sub">Bildi, Gujarat</div>${photo}<h3>${escapeHtml(st.full_name)}</h3><div class="details"><b>GR No:</b> ${escapeHtml(st.admission_no)}<br><b>Standard:</b> ${escapeHtml(st.standard)} ${escapeHtml(st.stream||"")}<br><b>Division:</b> ${escapeHtml(st.division||"A")}<br><b>Roll No:</b> ${st.roll_no??"—"}</div></div><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close();
+      const photo=studentPhotoUrls[st.id]?`<img src="${escapeHtml(studentPhotoUrls[st.id])}" class="photo">`:`<div class="photo placeholder">PHOTO</div>`;
+      const logoUrl = `${window.location.origin}/school-logo.jpeg`;
+      w.document.write(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Student ID Card - ${escapeHtml(st.full_name)}</title><style>
+        *{box-sizing:border-box}body{margin:0;padding:30px;font-family:Arial,Helvetica,sans-serif;background:#e9eff8;color:#14345c;display:flex;justify-content:center}
+        .card{position:relative;isolation:isolate;width:360px;min-height:540px;overflow:hidden;border:2px solid #174e91;border-radius:18px;background:linear-gradient(145deg,#fff 0%,#f0f7ff 100%);box-shadow:0 10px 30px rgba(9,46,94,.16);text-align:center}
+        .watermark{position:absolute;z-index:-1;top:49%;left:50%;transform:translate(-50%,-50%);width:265px;height:265px;object-fit:contain;opacity:.085;pointer-events:none}
+        .top{background:linear-gradient(115deg,#0d3974,#1976ba);color:white;padding:20px 14px 18px;border-bottom:5px solid #f4bd45}
+        .id-school-header{display:flex;align-items:center;justify-content:center;gap:12px}.id-school-logo{width:66px;height:66px;object-fit:contain;background:white;border-radius:50%;padding:5px;border:2px solid #f4bd45}
+        .head{font-weight:800;font-size:17px;line-height:1.25;text-align:left}.sub{font-size:12px;margin-top:5px;text-align:left;color:#d8edff}.id-label{font-size:11px;letter-spacing:2px;font-weight:bold;margin-top:14px;color:#fff0b5}
+        .body{padding:18px 22px 24px}.photo{display:block;width:100px;height:118px;object-fit:cover;margin:0 auto 12px;border:3px solid #fff;border-radius:10px;box-shadow:0 0 0 2px #2373b4;background:#e5eef8}
+        .placeholder{display:flex;align-items:center;justify-content:center;color:#57708e;font-size:13px}.student-name{font-size:20px;font-weight:800;color:#103b76;margin:8px 0 14px;overflow-wrap:anywhere}
+        .details{background:rgba(255,255,255,.8);border:1px solid #c9dff3;border-radius:12px;text-align:left;padding:12px 14px;font-size:13px;line-height:1.9}
+        .detail{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #e4edf6}.detail:last-child{border:0}.detail b{color:#2866a0}.detail span{text-align:right;font-weight:600;overflow-wrap:anywhere}
+        .bottom{height:12px;background:linear-gradient(90deg,#f0ad32,#f9d96c,#f0ad32);margin-top:18px}
+        @media print{@page{size:auto;margin:10mm}body{background:white;padding:0;display:block;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.card{box-shadow:none;break-inside:avoid;page-break-inside:avoid}.top,.bottom{ -webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+      </style></head><body><div class="card"><img class="watermark" src="${logoUrl}" alt="" aria-hidden="true"><div class="top"><div class="id-school-header"><img class="id-school-logo" src="${logoUrl}" alt="School logo"><div><div class="head">Government Secondary School</div><div class="sub">Bildi, Gujarat</div></div></div><div class="id-label">STUDENT IDENTITY CARD</div></div><div class="body">${photo}<div class="student-name">${escapeHtml(st.full_name)}</div><div class="details"><div class="detail"><b>GR Number</b><span>${escapeHtml(st.admission_no)}</span></div><div class="detail"><b>Standard</b><span>${escapeHtml(st.standard)} ${escapeHtml(st.stream||"")}</span></div><div class="detail"><b>Division</b><span>${escapeHtml(st.division||"A")}</span></div><div class="detail"><b>Roll Number</b><span>${escapeHtml(st.roll_no??"—")}</span></div></div></div><div class="bottom"></div></div><script>window.onload=async()=>{await Promise.all(Array.from(document.images).map(img=>img.complete?Promise.resolve():new Promise(resolve=>{img.onload=resolve;img.onerror=resolve;})));window.print();}<\/script></body></html>`);w.document.close();
     }));
     document.querySelectorAll("[data-delete-student]").forEach(button => button.addEventListener("click", async () => {
       if (!confirm("Delete this student and related attendance/results/fees?")) return;
@@ -775,12 +872,12 @@ async function renderPortal() {
     event.preventDefault();
     const btn=document.querySelector("#saveMarksBtn"), errorBox=document.querySelector("#marksError");
     btn.disabled=true;errorBox.textContent="";
-    const studentId=Number(document.querySelector("#markStudent").value);
+    const studentId=document.querySelector("#markStudent").value;
     const obtained=Number(document.querySelector("#markObtained").value), maximum=Number(document.querySelector("#markMaximum").value);
-    if(!studentId||!Number.isFinite(obtained)||!Number.isFinite(maximum)||maximum<=0||obtained<0||obtained>maximum){errorBox.textContent="Select a student and enter valid marks (obtained marks cannot exceed maximum marks).";btn.disabled=false;return;}
+    if(!studentId||!students.some(st=>String(st.id)===String(studentId))||!Number.isFinite(obtained)||!Number.isFinite(maximum)||maximum<=0||obtained<0||obtained>maximum){errorBox.textContent="Select a student and enter valid marks (obtained marks cannot exceed maximum marks).";btn.disabled=false;return;}
     const payload={student_id:studentId,academic_year:document.querySelector("#markYear").value.trim(),exam_name:document.querySelector("#markExam").value.trim(),subject:document.querySelector("#markSubject").value.trim(),marks_obtained:obtained,max_marks:maximum,remarks:document.querySelector("#markRemarks").value.trim()||null,created_by:session.user.id};
     const editId=document.querySelector("#markEditId").value;
-    const result=editId?await supabase.from("exam_marks").update(payload).eq("id",Number(editId)):await supabase.from("exam_marks").insert(payload);
+    const result=editId?await supabase.from("exam_marks").update(payload).eq("id",Number(editId)):await supabase.from("exam_marks").upsert(payload,{onConflict:"student_id,academic_year,exam_name,subject"});
     if(result.error){errorBox.textContent=result.error.message;btn.disabled=false;return;}
     await renderPortal();
   });
@@ -806,6 +903,90 @@ async function renderPortal() {
     const url=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"}));const a=document.createElement("a");a.href=url;a.download="school-examination-marks.csv";a.click();URL.revokeObjectURL(url);
   });
 
+  // Bulk marks template: all student rows are prefilled; IDs are validated on import.
+  const bulkMarksCsv = (rows, filename) => {
+    const csv = rows.map(row => row.map(v => `"${String(v ?? "").replaceAll('"','""')}"`).join(",")).join("\r\n");
+    const url=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"}));
+    const a=document.createElement("a");a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  };
+  const normalizeCsvMatch = value => String(value ?? "").normalize("NFKC").trim().replace(/\s+/g," ").toLocaleLowerCase();
+  const normalizeAcademicYear = value => normalizeCsvMatch(value).replace(/[–—−]/g,"-").replace(/\s*[-/]\s*/g,"-");
+  const normalizeExam = value => normalizeCsvMatch(value).replace(/[–—−]/g,"-").replace(/\s*[-/]\s*/g,"-");
+  const bulkConfig=()=>({
+    std:document.querySelector("#marksFilterStandard").value,
+    division:document.querySelector("#marksFilterDivision").value,
+    year:document.querySelector("#marksBulkYear").value.trim(),
+    exam:document.querySelector("#marksBulkExam").value.trim(),
+    subjects:document.querySelector("#marksBulkSubjects").value.split(",").map(x=>x.trim()).filter(Boolean),
+    maximum:Number(document.querySelector("#marksBulkMaximum").value)
+  });
+  const bulkStatus=document.querySelector("#marksBulkStatus");
+  let validatedMarks=[];
+  document.querySelector("#downloadPrefilledMarksCsv")?.addEventListener("click",()=>{
+    const c=bulkConfig();
+    if(!c.std||!c.year||!c.exam||!c.subjects.length||!Number.isFinite(c.maximum)||c.maximum<=0){bulkStatus.textContent="Select standard, academic year, exact exam, subjects and valid maximum marks first.";return;}
+    if(new Set(c.subjects.map(x=>x.toLowerCase())).size!==c.subjects.length){bulkStatus.textContent="Duplicate subject names are not allowed.";return;}
+    const matching=students.filter(st=>String(st.standard)===c.std&&(!c.division||(st.division||"A")===c.division));
+    if(!matching.length){bulkStatus.textContent="No students found for selected class.";return;}
+    const headers=["Student ID","GR Number","Student Name","Standard","Division","Roll Number","Academic Year","Exam",...c.subjects.flatMap(x=>[x+" - Obtained",x+" - Maximum"])];
+    const rows=[headers,...matching.map(st=>[st.id,st.admission_no,st.full_name,st.standard,st.division||"A",st.roll_no??"",c.year,c.exam,...c.subjects.flatMap(subject=>{const existing=examMarks.find(m=>String(m.student_id)===String(st.id)&&normalizeAcademicYear(m.academic_year)===normalizeAcademicYear(c.year)&&normalizeExam(m.exam_name)===normalizeExam(c.exam)&&normalizeCsvMatch(m.subject)===normalizeCsvMatch(subject));return [existing?.marks_obtained??"",existing?.max_marks??c.maximum]})])];
+    bulkMarksCsv(rows,`marks-std-${c.std}-${c.exam.replace(/[^a-z0-9-]/gi,"-")}.csv`);
+    bulkStatus.textContent=`Downloaded ${matching.length} existing students with ${c.subjects.length} subjects. Fill obtained marks; blank marks are skipped.`;
+  });
+  const parseMarksCsv=text=>{
+    const rows=[];let row=[],cell="",quoted=false;
+    for(let i=0;i<text.length;i++){const ch=text[i];if(ch==='"'&&quoted&&text[i+1]==='"'){cell+='"';i++;}else if(ch==='"')quoted=!quoted;else if(ch===','&&!quoted){row.push(cell.trim());cell="";}else if((ch==='\r'||ch==='\n')&&!quoted){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(cell.trim());if(row.some(v=>v!==""))rows.push(row);row=[];cell="";}else cell+=ch;}
+    if(quoted)throw Error("CSV contains an unclosed quotation mark.");
+    if(cell||row.length){row.push(cell.trim());if(row.some(v=>v!==""))rows.push(row);}return rows;
+  };
+  document.querySelector("#previewMarksCsv")?.addEventListener("click",async()=>{
+    validatedMarks=[];document.querySelector("#saveMarksCsv").disabled=true;
+    const preview=document.querySelector("#marksBulkPreview");preview.innerHTML="";
+    const file=document.querySelector("#marksBulkFile").files[0];if(!file){bulkStatus.textContent="Choose a filled CSV first.";return;}
+    try{
+      const rows=parseMarksCsv((await file.text()).replace(/^\uFEFF/,""));if(rows.length<2)throw Error("CSV has no student rows.");
+      const headers=rows[0].map(x=>x.trim().replace(/^\uFEFF/,""));const required=["Student ID","GR Number","Student Name","Standard","Division","Academic Year","Exam"];
+      for(const h of required)if(!headers.includes(h))throw Error("Missing CSV column: "+h);
+      const subjectCols=headers.map((h,i)=>({h,i})).filter(x=>x.h.endsWith(" - Obtained"));
+      if(!subjectCols.length)throw Error("No subject columns found. Download the provided template.");
+      const c=bulkConfig(), errors=[], seen=new Set(), data=[];
+      for(let ri=1;ri<rows.length;ri++){
+        const vals=rows[ri];const get=h=>vals[headers.indexOf(h)]??"";
+        const st=students.find(x=>String(x.id)===get("Student ID"));
+        if(!st){errors.push(`Row ${ri+1}: unknown Student ID`);continue;}
+        if(String(st.admission_no)!==get("GR Number")||String(st.full_name)!==get("Student Name")||String(st.standard)!==get("Standard")||(st.division||"A")!==get("Division")){errors.push(`Row ${ri+1}: student details do not match the saved student record`);continue;}
+        if(c.std&&String(st.standard)!==c.std||c.division&&(st.division||"A")!==c.division){errors.push(`Row ${ri+1}: student outside selected class`);continue;}
+        const year=get("Academic Year").trim(),exam=get("Exam").trim();
+        if(!year||!exam||normalizeAcademicYear(year)!==normalizeAcademicYear(c.year)||normalizeExam(exam)!==normalizeExam(c.exam)){
+          errors.push(`Row ${ri+1}: Academic Year / Exam mismatch. CSV: "${year}" / "${exam}"; Website: "${c.year}" / "${c.exam}". Set the website fields to match the CSV or download a fresh template.`);continue;
+        }
+        for(const col of subjectCols){const subject=col.h.slice(0,-" - Obtained".length).trim(),raw=vals[col.i]??"";
+          if(raw==="")continue;
+          const maxHeader=subject+" - Maximum",maxRaw=get(maxHeader);
+          if(!headers.includes(maxHeader)||!/^\d+(\.\d+)?$/.test(raw)||!/^\d+(\.\d+)?$/.test(maxRaw)){errors.push(`Row ${ri+1}, ${subject}: marks must be numeric`);continue;}
+          const obtained=Number(raw),maximum=Number(maxRaw);
+          if(maximum<=0||obtained>maximum){errors.push(`Row ${ri+1}, ${subject}: obtained exceeds maximum or maximum is zero`);continue;}
+          const key=`${st.id}|${normalizeAcademicYear(c.year)}|${normalizeExam(c.exam)}|${normalizeCsvMatch(subject)}`;
+          if(seen.has(key)){errors.push(`Row ${ri+1}: duplicate marks for ${subject}`);continue;}seen.add(key);
+          data.push({student_id:st.id,academic_year:c.year.trim(),exam_name:c.exam.trim(),subject,marks_obtained:obtained,max_marks:maximum,created_by:session.user.id});
+        }
+      }
+      if(errors.length){bulkStatus.textContent=`Validation failed: ${errors.length} error(s). Nothing saved. ${errors.slice(0,12).join(" | ")}`;return;}
+      validatedMarks=data;bulkStatus.textContent=`Validated ${data.length} subject marks for ${new Set(data.map(x=>x.student_id)).size} students. Blank marks skipped. Click Save Validated Marks.`;
+      preview.innerHTML=`<table class="result-table"><thead><tr><th>Student</th><th>Subject</th><th>Obtained</th><th>Maximum</th></tr></thead><tbody>${data.slice(0,30).map(m=>`<tr><td>${escapeHtml(students.find(x=>String(x.id)===String(m.student_id))?.full_name||"")}</td><td>${escapeHtml(m.subject)}</td><td>${m.marks_obtained}</td><td>${m.max_marks}</td></tr>`).join("")}</tbody></table>`;
+      document.querySelector("#saveMarksCsv").disabled=!data.length;
+    }catch(err){bulkStatus.textContent="CSV error: "+err.message;}
+  });
+  document.querySelector("#saveMarksCsv")?.addEventListener("click",async()=>{
+    if(!validatedMarks.length)return;
+    const btn=document.querySelector("#saveMarksCsv");btn.disabled=true;
+    let saved=0;
+    for(const mark of validatedMarks){
+      const {error}=await supabase.from("exam_marks").upsert(mark,{onConflict:"student_id,academic_year,exam_name,subject"});
+      if(error){bulkStatus.textContent=`Saved ${saved} of ${validatedMarks.length}. Error: ${error.message}. You may re-upload safely.`;return;}saved++;
+    }
+    bulkStatus.textContent=`Successfully saved ${saved} subject marks. Refreshing...`;await renderPortal();
+  });
   let generatedResultRows = [];
   const csvDownload = (rows, filename) => {
     const csv = rows.map(row => row.map(v => `"${String(v ?? "").replaceAll('"','""')}"`).join(",")).join("\r\n");
@@ -848,10 +1029,57 @@ async function renderPortal() {
     generatedResultRows.forEach((r,i) => r.rank = i+1);
     const passCount = generatedResultRows.filter(r=>r.result==="PASS").length;
     message.textContent = `${generatedResultRows.length} students · ${passCount} PASS · ${generatedResultRows.length-passCount} FAIL · Pass mark ${passPercent}%`;
-    list.innerHTML = `<div class="result-table-wrap"><table class="result-table"><thead><tr><th>Rank</th><th>GR No.</th><th>Student</th><th>Roll</th><th>Total</th><th>Out of</th><th>Percentage</th><th>Result</th><th>Subject details</th></tr></thead><tbody>${generatedResultRows.map(r=>`<tr><td>${r.rank}</td><td>${escapeHtml(r.student.admission_no)}</td><td>${escapeHtml(r.student.full_name)}</td><td>${escapeHtml(r.student.roll_no ?? "—")}</td><td>${r.obtained.toFixed(2)}</td><td>${r.maximum.toFixed(2)}</td><td>${r.percentage.toFixed(2)}%</td><td><strong class="${r.result==="PASS"?"result-pass":"result-fail"}">${r.result}</strong></td><td>${r.subjects.map(x=>`${escapeHtml(x.subject)}: ${x.obtained}/${x.maximum} (${x.percentage.toFixed(1)}%)`).join("<br>")}</td></tr>`).join("")}</tbody></table></div>`;
+    list.innerHTML = `<div class="result-table-wrap"><table class="result-table"><thead><tr><th>Rank</th><th>GR No.</th><th>Student</th><th>Roll</th><th>Total</th><th>Out of</th><th>Percentage</th><th>Result</th><th>Subject details</th><th>Result PDF</th></tr></thead><tbody>${generatedResultRows.map(r=>`<tr><td>${r.rank}</td><td>${escapeHtml(r.student.admission_no)}</td><td>${escapeHtml(r.student.full_name)}</td><td>${escapeHtml(r.student.roll_no ?? "—")}</td><td>${r.obtained.toFixed(2)}</td><td>${r.maximum.toFixed(2)}</td><td>${r.percentage.toFixed(2)}%</td><td><strong class="${r.result==="PASS"?"result-pass":"result-fail"}">${r.result}</strong></td><td>${r.subjects.map(x=>`${escapeHtml(x.subject)}: ${x.obtained}/${x.maximum} (${x.percentage.toFixed(1)}%)`).join("<br>")}</td><td><button type="button" class="portal-primary" data-print-result="${escapeHtml(String(r.student.id))}">Print / Save PDF</button></td></tr>`).join("")}</tbody></table></div>`;
     document.querySelector("#downloadResultCsv").disabled = false;
     document.querySelector("#downloadTop10Csv").disabled = false;
   };
+  // Print-ready individual report card with private student photo and school logo.
+  // The browser's Save as PDF preserves embedded photo and styling; CSV cannot embed images.
+  document.querySelector("#resultReportList")?.addEventListener("click", event => {
+    const button = event.target.closest("[data-print-result]");
+    if (!button) return;
+    const r = generatedResultRows.find(item => String(item.student.id) === button.dataset.printResult);
+    if (!r) return;
+    const w = window.open("", "_blank", "width=900,height=800");
+    if (!w) { alert("Please allow pop-ups to print or save the result PDF."); return; }
+    const st = r.student;
+    const photoUrl = studentPhotoUrls[st.id];
+    const photo = photoUrl ? `<img class="student-photo" src="${escapeHtml(photoUrl)}" alt="Student photo">` : `<div class="student-photo missing">PHOTO NOT UPLOADED</div>`;
+    const logo = `${window.location.origin}/school-logo.jpeg`;
+    const year = document.querySelector("#resultYear").value;
+    const exam = document.querySelector("#resultExam").value;
+    const standard = document.querySelector("#resultStandard").value;
+    const subjectRows = r.subjects.map((m, i) => `<tr><td>${i+1}</td><td>${escapeHtml(m.subject)}</td><td>${escapeHtml(String(m.maximum))}</td><td>${escapeHtml(String(m.obtained))}</td><td>${m.percentage.toFixed(2)}%</td></tr>`).join("");
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Result - ${escapeHtml(st.full_name)}</title>
+      <style>
+      *{box-sizing:border-box}body{margin:0;background:#e8eef8;color:#14223c;font-family:Arial,sans-serif;padding:22px}
+      .sheet{position:relative;overflow:hidden;max-width:780px;margin:auto;background:#fff;border:3px solid #174b91;border-radius:15px;padding:24px 28px 30px;box-shadow:0 5px 20px #0002}
+      .watermark{position:absolute;top:34%;left:26%;width:48%;opacity:.065;z-index:0;pointer-events:none}.content{position:relative;z-index:1}
+      header{display:flex;align-items:center;gap:16px;border-bottom:4px solid #e9ae36;padding-bottom:14px}
+      .logo{width:85px;height:85px;object-fit:contain}.school{font-size:23px;font-weight:800;color:#164a91}.place{font-size:15px;color:#55637a;margin-top:4px}
+      h2{text-align:center;background:linear-gradient(100deg,#154c91,#2478bb);color:#fff;border-radius:7px;padding:11px;font-size:18px;margin:20px 0}
+      .details{display:grid;grid-template-columns:1fr 115px;gap:18px;align-items:start}.info{display:grid;grid-template-columns:130px 1fr;gap:10px 8px;font-size:14px}.info strong{color:#173d73}
+      .student-photo{width:110px;height:135px;object-fit:cover;border:2px solid #174b91;border-radius:6px;background:#f1f5fa}
+      .missing{font-size:11px;color:#667;display:flex;align-items:center;justify-content:center;text-align:center;padding:8px}
+      table{width:100%;border-collapse:collapse;margin-top:24px;font-size:14px}th{background:#174b91;color:white}td,th{border:1px solid #b4c6db;padding:9px;text-align:left}tbody tr:nth-child(even){background:#f0f5fc}
+      .summary{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:18px;padding:12px;background:#eaf2ff;border-radius:7px;font-weight:bold}
+      .signatures{display:flex;justify-content:space-between;gap:24px;margin-top:65px;font-size:14px;font-weight:bold;text-align:center}.signatures span{min-width:160px;border-top:1px solid #333;padding-top:8px} .rank{font-weight:bold;color:#174b91} .status{color:${r.result === "PASS" ? "#147443" : "#b22a36"}}.footer{text-align:center;color:#617087;margin-top:40px;font-size:12px}
+      @media print{@page{size:A4;margin:12mm}body{background:white;padding:0;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.sheet{max-width:none;box-shadow:none;border-radius:0;break-inside:avoid}.summary,th,h2{print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important}}
+      </style></head><body><div class="sheet"><img class="watermark" src="${logo}" alt=""><div class="content"><header><img class="logo" src="${logo}" alt="School logo"><div><div class="school">Government Secondary School</div><div class="place">Bildi, Gujarat</div></div></header>
+      <h2>વિદ્યાર્થી પરીક્ષા પરિણામ / STUDENT EXAMINATION RESULT</h2><div class="details"><div class="info">
+      <strong>Student Name</strong><span>${escapeHtml(st.full_name)}</span>
+      <strong>GR Number</strong><span>${escapeHtml(st.admission_no ?? "—")}</span>
+      <strong>Standard / Division</strong><span>${escapeHtml(String(standard))} / ${escapeHtml(st.division || "A")}</span>
+      <strong>Roll Number</strong><span>${escapeHtml(String(st.roll_no ?? "—"))}</span>
+      <strong>Academic Year</strong><span>${escapeHtml(year)}</span>
+      <strong>Exam</strong><span>${escapeHtml(exam)}</span>
+      </div>${photo}</div>
+      <table><thead><tr><th>No.</th><th>Subject</th><th>Maximum Marks</th><th>Obtained Marks</th><th>Percentage</th></tr></thead><tbody>${subjectRows}</tbody></table>
+      <div class="summary"><span>Total: ${r.obtained.toFixed(2)} / ${r.maximum.toFixed(2)}</span><span>Percentage: ${r.percentage.toFixed(2)}%</span><span class="rank">Rank: ${r.rank}</span><span class="status">${r.result}</span></div><div class="signatures"><span>વર્ગશિક્ષકની સહી<br>Class Teacher</span><span>આચાર્યશ્રીની સહી<br>Principal</span></div>
+      <div class="footer">Generated from School Management System</div></div></div>
+      <script>window.onload=async()=>{await Promise.all(Array.from(document.images).map(img=>img.complete?Promise.resolve():new Promise(resolve=>{img.onload=resolve;img.onerror=resolve})));window.print()};<\/script></body></html>`);
+    w.document.close();
+  });
   document.querySelector("#generateResult")?.addEventListener("click", generateResultReport);
   document.querySelector("#downloadResultCsv")?.addEventListener("click", () => {
     if (!generatedResultRows.length) return;

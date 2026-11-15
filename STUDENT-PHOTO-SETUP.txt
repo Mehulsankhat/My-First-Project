@@ -1,0 +1,1 @@
+Run supabase/student-photo-upload.sql in Supabase SQL Editor. Copy old .env into folder with package.json. Run npm install and npm run dev. Photos are private, with one-hour signed URLs for staff and ID card. Existing student records preserved. Existing students UPDATE policy must allow the staff role.\n
