@@ -1,0 +1,9 @@
+Teacher Standard Access Setup
+1. Run supabase/teacher-standard-access-migration.sql in Supabase SQL Editor ONCE.
+2. Restart website after copying old .env file.
+3. Admin or Principal login -> Assign Teacher Standard -> choose Std 9/10/11/12 -> Save.
+4. Teacher login again -> only assigned standard's students, marks and attendance appear.
+5. Principal/Admin can see all standards.
+6. Unassigned teachers see no student records until assigned.
+7. Existing student records and marks are not deleted.
+IMPORTANT: Review other existing RLS policies on students/attendance/exam_marks for permissive grants from previous custom SQL. Public result lookup is a separate server-side function and is not changed by this migration.

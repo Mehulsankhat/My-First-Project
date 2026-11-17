@@ -1,0 +1,9 @@
+PUBLIC RESULT SEARCH SETUP
+1. Supabase SQL Editor -> run supabase/public-result-lookup.sql once.
+2. Keep existing student and exam_marks tables. Do not delete data.
+3. Copy existing .env to project root, run npm install and npm run dev.
+4. Public website menu -> પરિણામ / Results -> enter exact GR, Roll, Academic Year, Exam -> Search.
+5. Print / Save PDF produces school-logo, watermark, subjects, totals and signature lines.
+6. Public results intentionally omit private student photos. Staff Result PDF still supports photos.
+7. Public lookup uses GR + roll as verification, not strong authentication. For sensitive student records use authenticated parent/student login and server-side rate limiting before publishing broadly.
+8. Result is calculated from saved exam_marks; pass threshold for public view is 33% per subject. Rank is not shown publicly because rank calculation depends on complete cohort data.

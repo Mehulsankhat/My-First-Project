@@ -1,0 +1,13 @@
+PUBLIC RESULT PHOTO - SETUP
+
+1. Supabase SQL Editor: run supabase/public-result-lookup.sql if not already run.
+2. Ensure student photos are already uploaded to the private student-photos bucket.
+3. Install Supabase CLI and login, link your project.
+4. From project root run:
+   npx supabase login
+   npx supabase link --project-ref YOUR_PROJECT_REF
+   npx supabase functions deploy public-result-with-photo --no-verify-jwt
+5. Copy your existing .env into project root; npm install; npm run dev.
+6. Open Results and search using GR, roll, academic year and exam. Photo appears in result and Print/PDF.
+
+SECURITY: private student-photos bucket stays private; server returns signed photo URL valid 5 minutes only after exact result lookup. Public GR+roll lookup is not strong authentication and can be guessed; add rate limiting/CAPTCHA and explicit school consent before public deployment. Do NOT place service role key in .env/Vite frontend.

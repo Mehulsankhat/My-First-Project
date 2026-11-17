@@ -1,0 +1,5 @@
+1. Run supabase/teacher-pending-account-removal.sql in Supabase SQL Editor ONCE.
+2. Copy .env into project root, then npm install and npm run dev.
+3. Pending teacher login displays Approval Pending until approved.
+4. Admin/Principal can use Delete Account on pending or approved teacher.
+IMPORTANT: Delete Account REVOKES WEBSITE ACCESS and preserves student data; it does not physically delete the Supabase Auth user. Existing signed-in sessions should be signed out/reloaded; database RLS must be checked for other permissive policies.

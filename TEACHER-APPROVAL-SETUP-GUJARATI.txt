@@ -1,0 +1,11 @@
+TEACHER APPROVAL UPDATE
+
+1. ZIP extract karo. Old .env copy karo.
+2. Supabase SQL Editor ma supabase/teacher-website-approval-migration.sql ek var Run karo.
+3. npm install ane npm run dev.
+4. Website Staff Login -> Create staff account (Teacher only).
+5. Existing Admin athva Principal login -> Teacher Registration Approvals -> Approve.
+6. Approved Teacher login kari shakshe. Pending/rejected ne dashboard access nahi.
+
+IMPORTANT: Supabase Dashboard ma daily approval karvani jarur nathi. Supabase database backend ma status store thay chhe. Email confirmation Supabase Auth setting par depend kare chhe.
+Existing students, marks, gallery and profiles preserved.

@@ -1,0 +1,14 @@
+Principal/Admin Dashboard -> Staff Account Management — All Teachers
+Pending, Approved, Rejected, Not Assigned and Removed teacher accounts appear.
+For approved teachers, assign Std 9/10/11/12 or leave Not Assigned.
+Delete Account revokes website access; it does NOT physically delete auth.users.
+Students, marks, results and historical records are retained.
+
+IMPORTANT SQL ORDER (run each once in Supabase SQL Editor):
+1. supabase/teacher-website-approval-migration.sql
+2. supabase/teacher-standard-access-migration.sql
+3. supabase/teacher-pending-account-removal.sql
+4. supabase/all-teachers-management.sql (NEW)
+
+Copy your existing .env into the project root, then npm install and npm run dev.
+Test with a Principal account. This build is not live-tested against your Supabase database.

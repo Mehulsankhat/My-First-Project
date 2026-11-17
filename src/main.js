@@ -119,6 +119,7 @@ function render() {
           <a href="#notices">${t("notices")}</a>
           <a href="#quick">${t("academics")}</a>
           <a href="#gallery">${t("gallery")}</a>
+          <a href="#public-results">${currentLanguage === "gu" ? "પરિણામ" : "Results"}</a>
           <a href="#contact">${t("contact")}</a>
         </nav>
         <a class="staff-login-link" href="#admin">${currentLanguage === "gu" ? "સ્ટાફ લોગિન" : "Staff Login"}</a>
@@ -198,6 +199,21 @@ function render() {
       </section>
 
       
+<section class="section public-results-section" id="public-results">
+  <div class="container">
+    <div class="section-heading"><div><span class="section-kicker">${currentLanguage === "gu" ? "વિદ્યાર્થી પરિણામ" : "Student Results"}</span><h2>${currentLanguage === "gu" ? "તમારું પરિણામ શોધો" : "Find your result"}</h2><p>${currentLanguage === "gu" ? "GR નંબર, રોલ નંબર, શૈક્ષણિક વર્ષ અને પરીક્ષા દાખલ કરો." : "Enter GR number, roll number, academic year and exam."}</p></div></div>
+    <form id="publicResultForm" class="public-result-form">
+      <label>GR Number<input id="publicResultGr" required maxlength="40" autocomplete="off" /></label>
+      <label>Roll Number<input id="publicResultRoll" required maxlength="20" autocomplete="off" /></label>
+      <label>Academic Year<input id="publicResultYear" required maxlength="12" value="2026-27" /></label>
+      <label>Exam Name<input id="publicResultExam" required maxlength="100" placeholder="e.g. First Exam" /></label>
+      <button type="submit" class="primary-btn">${currentLanguage === "gu" ? "પરિણામ શોધો" : "Search Result"}</button>
+    </form>
+    <p class="portal-muted" id="publicResultStatus" role="status" aria-live="polite"></p>
+    <div id="publicResultOutput"></div>
+    <p class="portal-muted">${currentLanguage === "gu" ? "પરિણામ ફક્ત યોગ્ય વિગતો મળ્યા પછી જ દેખાશે. ફોટો ખાનગી હોવાથી જાહેર પરિણામમાં દેખાડવામાં આવતો નથી." : "Results appear only when details match. Private student photos are not displayed publicly."}</p>
+  </div>
+</section>
 <section class="section gallery-section" id="gallery">
     <div class="container">
 
@@ -388,6 +404,7 @@ function setupGalleryViewer(photos) {
 // =====================================
 
 loadPublicGallery();
+setupPublicResultSearch();
 
   document.querySelector("#languageToggle").addEventListener("click", () => {
     currentLanguage = currentLanguage === "gu" ? "en" : "gu";
@@ -410,11 +427,20 @@ loadPublicGallery();
 async function getStaffProfile(userId) {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, full_name, role")
+    .select("id, full_name, role, assigned_standard")
     .eq("id", userId)
     .single();
   if (error) throw error;
   return data;
+}
+
+async function staffLoginMessage() {
+  const {data,error}=await supabase.rpc('my_staff_approval_status');
+  if(error) return 'Account is not approved. Please contact Admin / Principal.';
+  if(data==='pending') return 'Approval Pending: Admin અથવા Principal ની મંજૂરી બાકી છે. મંજૂરી પછી જ Login કરી શકશો.';
+  if(data==='rejected') return 'Registration rejected. Please contact Admin / Principal.';
+  if(data==='removed') return 'Account deleted / access removed by Admin or Principal.';
+  return 'Staff account not approved. Contact Admin / Principal.';
 }
 
 async function renderPortal() {
@@ -450,18 +476,18 @@ async function renderPortal() {
               <p id="loginError" class="portal-error" aria-live="polite"></p><button class="portal-primary" type="submit">Sign in</button>
             </form><button id="showRegister" class="portal-secondary" type="button">Create staff account</button>
           </div>
-          <div id="staffRegisterView" hidden><p class="portal-muted">New account registration (Admin approval required)</p>
+          <div id="staffRegisterView" hidden><p class="portal-muted">Teacher registration (Admin or Principal approval required)</p>
             <form id="staffRegisterForm" class="portal-form">
               <label>Full name<input id="regName" required maxlength="100" /></label>
               <label>Email<input id="regEmail" type="email" required /></label>
               <label>Phone<input id="regPhone" type="tel" maxlength="20" /></label>
-              <label>Register as<select id="regRole" required><option value="teacher">Teacher</option><option value="principal">Principal</option><option value="admin">Admin</option></select></label>
+              <input id="regRole" type="hidden" value="teacher" /><p class="portal-muted">Role: Teacher (Admin and Principal accounts are managed separately.)</p>
               <label>Password<input id="regPassword" type="password" minlength="8" required /></label>
               <label>Confirm password<input id="regConfirm" type="password" minlength="8" required /></label>
               <p id="registerMessage" class="portal-error" aria-live="polite"></p><button class="portal-primary" type="submit">Submit registration</button>
             </form><button id="showLogin" class="portal-secondary" type="button">Back to login</button>
           </div>
-          <p class="portal-warning">New accounts remain pending until an existing Admin or approved Principal approves them. Verify your email if requested.</p>
+          <p class="portal-warning">New Teacher accounts remain pending until an existing Admin OR Principal approves them on this website. Email verification may still be required if enabled in Supabase Auth.</p>
         </section></main>`;
     const loginView=document.querySelector('#staffLoginView'), registerView=document.querySelector('#staffRegisterView');
     document.querySelector('#showRegister').onclick=()=>{loginView.hidden=true;registerView.hidden=false;};
@@ -471,14 +497,14 @@ async function renderPortal() {
       const password=document.querySelector('#regPassword').value;
       if(password!==document.querySelector('#regConfirm').value){msg.textContent='Passwords do not match.';return;}
       const {error}=await supabase.auth.signUp({email:document.querySelector('#regEmail').value.trim(),password,options:{data:{full_name:document.querySelector('#regName').value.trim(),phone:document.querySelector('#regPhone').value.trim(),requested_role:document.querySelector('#regRole').value}}});
-      msg.textContent=error?error.message:'Registration submitted. Please verify your email if prompted. Your account is PENDING until an Admin or Principal approves it.';
-      if(!error)e.currentTarget.reset();
+      msg.textContent=error?error.message:'Teacher registration submitted. Your account remains PENDING until an Admin or Principal approves it here. Check your email if verification is enabled.';
+      if(!error){e.currentTarget.reset();await supabase.auth.signOut();}
     });
     document.querySelector('#staffLoginForm').addEventListener('submit',async e=>{
       e.preventDefault();const button=e.currentTarget.querySelector('button[type=submit]'),errorBox=document.querySelector('#loginError');button.disabled=true;errorBox.textContent='';
       const {data,error}=await supabase.auth.signInWithPassword({email:document.querySelector('#loginEmail').value.trim(),password:document.querySelector('#loginPassword').value});
       if(error){errorBox.textContent=error.message;button.disabled=false;return;}
-      try{await getStaffProfile(data.user.id);await renderPortal();}catch{await supabase.auth.signOut();errorBox.textContent='Account is pending approval or has no approved staff profile.';button.disabled=false;}
+      try{await getStaffProfile(data.user.id);await renderPortal();}catch{const message=await staffLoginMessage();await supabase.auth.signOut();errorBox.textContent=message;button.disabled=false;}
     });
     return;
   }
@@ -493,21 +519,31 @@ async function renderPortal() {
   }
 
   const isAdmin = profile.role === "admin" || profile.role === "principal";
+  const assignedStandard = isAdmin ? null : String(profile.assigned_standard || "");
   if (!isAdmin && profile.role !== "teacher") {
     await supabase.auth.signOut();
     app.innerHTML = `<main class="portal-page"><section class="login-card"><h1>Access denied</h1><a href="#home">Back to website</a></section></main>`;
     return;
   }
 
+  const studentQuery = supabase.from("students").select("id,admission_no,full_name,standard,stream,division,roll_no,guardian_name,guardian_phone,status,photo_url");
+  const marksQuery = supabase.from("exam_marks").select("id,student_id,academic_year,exam_name,subject,marks_obtained,max_marks,remarks,created_at");
   const [noticeResult, homeworkResult, studentResult, marksResult, galleryResult] = await Promise.all([
     supabase.from("notices").select("id,title,details,created_at").order("created_at", { ascending: false }),
     supabase.from("homework").select("id,class_name,subject,details,created_at,created_by").order("created_at", { ascending: false }),
-    supabase.from("students").select("id,admission_no,full_name,standard,stream,division,roll_no,guardian_name,guardian_phone,status,photo_url").order("standard").order("roll_no"),
-    supabase.from("exam_marks").select("id,student_id,academic_year,exam_name,subject,marks_obtained,max_marks,remarks,created_at").order("created_at",{ascending:false}),
+    (isAdmin ? studentQuery : studentQuery.eq("standard",assignedStandard)).order("standard").order("roll_no"),
+    marksQuery.order("created_at",{ascending:false}),
     supabase.from("gallery_items").select("id,title,image_url,caption,is_published,created_by,created_at").order("created_at",{ascending:false})
   ]);
-  let registrationRequests=[]; let registrationError=null;
-  if(isAdmin){const rr=await supabase.from("staff_registration_requests").select("id,full_name,email,phone,requested_role,status,created_at").eq("status","pending").order("created_at",{ascending:true});registrationRequests=rr.data||[];registrationError=rr.error;}
+  let registrationRequests=[]; let registrationError=null; let teacherDirectory=[]; let teacherDirectoryError=null;
+  if(isAdmin){
+    const [rr, directory] = await Promise.all([
+      supabase.from("staff_registration_requests").select("id,full_name,email,phone,requested_role,status,created_at").eq("status","pending").eq("requested_role","teacher").order("created_at",{ascending:true}),
+      supabase.rpc("list_teacher_accounts_for_management")
+    ]);
+    registrationRequests=rr.data||[];registrationError=rr.error;
+    teacherDirectory=directory.data||[];teacherDirectoryError=directory.error;
+  }
   const notices = noticeResult.data || [];
   const homework = homeworkResult.data || [];
   const students = studentResult.data || [];
@@ -518,22 +554,26 @@ async function renderPortal() {
       .createSignedUrl(st.photo_url, 3600);
     if (!error && data?.signedUrl) studentPhotoUrls[st.id] = data.signedUrl;
   }));
-  const examMarks = marksResult.data || [];
+  const allowedStudentIds = new Set(students.map(st=>String(st.id)));
+  const examMarks = isAdmin ? (marksResult.data || []) : (marksResult.data || []).filter(m=>allowedStudentIds.has(String(m.student_id)));
   const galleryItems = galleryResult.data || [];
   const today = new Date().toLocaleDateString("en-CA");
   const attendanceResult = await supabase.from("attendance")
     .select("id,student_id,status,remarks")
     .eq("attendance_date", today);
-  const attendanceRows = attendanceResult.data || [];
+  const attendanceRows = isAdmin ? (attendanceResult.data || []) : (attendanceResult.data || []).filter(a=>allowedStudentIds.has(String(a.student_id)));
+  // All teacher accounts (including unassigned, pending, rejected and removed)
+  // are returned by a role-checked SECURITY DEFINER function.
   app.innerHTML = `
     <main class="portal-page portal-dashboard">
       <header class="portal-topbar"><a class="portal-brand" href="#home"><img src="/school-logo.jpeg" alt="School logo"/><span>GSS Bildi<br><small>Staff Portal</small></span></a><div class="portal-user"><span>${escapeHtml(profile.full_name)}</span><button id="logoutBtn" class="portal-logout">Log out</button></div></header>
       <div class="portal-content"><a class="portal-back" href="#home">← Public website</a>
         <div class="portal-welcome"><div><p class="portal-kicker">STAFF DASHBOARD</p><h1>${isAdmin ? "Principal / Admin Dashboard" : "Teacher Dashboard"}</h1><p class="portal-muted">${isAdmin ? "Manage school announcements and review homework." : "Share homework and class learning updates."}</p></div><span class="role-chip">${profile.role.toUpperCase()}</span></div>
-        <div class="portal-stats"><article><span>📢</span><b>${notices.length}</b><small>Notices</small></article><article><span>📘</span><b>${homework.length}</b><small>Homework posts</small></article><article><span>🎓</span><b>${students.length}</b><small>Students</small></article><article><span>🔐</span><b>${isAdmin ? "Full" : "Limited"}</b><small>Access level</small></article></div>
+        <div class="portal-stats"><article><span>📢</span><b>${notices.length}</b><small>Notices</small></article><article><span>📘</span><b>${homework.length}</b><small>Homework posts</small></article><article><span>🎓</span><b>${students.length}</b><small>Students</small></article><article><span>🔐</span><b>${isAdmin ? "Full" : `Std ${assignedStandard || "Not assigned"}`}</b><small>Access level</small></article></div>
         ${noticeResult.error ? `<p class="portal-error">Notices: ${escapeHtml(noticeResult.error.message)}</p>` : ""}
         ${homeworkResult.error ? `<p class="portal-error">Homework: ${escapeHtml(homeworkResult.error.message)}</p>` : ""}
-        ${isAdmin ? `<section class="portal-panel"><h2>Staff Registration Approvals</h2>${registrationError?`<p class="portal-error">Run supabase/staff-registration-approval.sql first: ${escapeHtml(registrationError.message)}</p>`:registrationRequests.length?`<div class="portal-list">${registrationRequests.map(r=>`<article><div><b>${escapeHtml(r.full_name)}</b><p>${escapeHtml(r.email)} · ${escapeHtml(r.phone||"No phone")} · Requested: ${escapeHtml(r.requested_role.toUpperCase())}</p></div><div class="student-actions"><button class="portal-primary" data-approve-registration="${r.id}">Approve</button><button class="portal-delete" data-reject-registration="${r.id}">Reject</button></div></article>`).join("")}</div>`:`<p class="portal-muted">No pending registrations.</p>`}</section>` : ""}
+        ${isAdmin ? `<section class="portal-panel"><h2>Teacher Registration Approvals</h2><p class="portal-muted">Only one approval is needed: Admin OR Principal. Approval is given here, not in the Supabase Dashboard.</p>${registrationError?`<p class="portal-error">Run supabase/staff-registration-approval.sql first: ${escapeHtml(registrationError.message)}</p>`:registrationRequests.length?`<div class="portal-list">${registrationRequests.map(r=>`<article><div><b>${escapeHtml(r.full_name)}</b><p>${escapeHtml(r.email)} · ${escapeHtml(r.phone||"No phone")} · Requested: ${escapeHtml(r.requested_role.toUpperCase())}</p></div><div class="student-actions"><button class="portal-primary" data-approve-registration="${r.id}">Approve</button><button class="portal-delete" data-reject-registration="${r.id}">Reject</button><button class="portal-delete" data-remove-pending="${r.id}">Delete Account</button></div></article>`).join("")}</div>`:`<p class="portal-muted">No pending registrations.</p>`}</section>` : ""}
+        ${isAdmin ? `<section class="portal-panel"><h2>Staff Account Management — All Teachers</h2><p class="portal-muted">Principal / Admin can see all teachers, including Not Assigned, Pending, Rejected and Removed. Deleting teacher access never deletes student records.</p>${teacherDirectoryError?`<p class="portal-error">Run supabase/all-teachers-management.sql: ${escapeHtml(teacherDirectoryError.message)}</p>`:teacherDirectory.length?`<div class="portal-list">${teacherDirectory.map(t=>`<article><div><b>${escapeHtml(t.full_name||t.email||"Teacher")}</b><p>${escapeHtml(t.email||"")} · Status: <strong>${escapeHtml(t.account_status)}</strong> · Standard: <strong>${escapeHtml(t.assigned_standard ? "Std "+t.assigned_standard : "Not Assigned")}</strong></p></div><div class="student-actions">${t.account_status==="approved"?`<select data-teacher-standard="${t.auth_user_id}"><option value="">Not Assigned</option>${["9","10","11","12"].map(v=>`<option value="${v}" ${String(t.assigned_standard||"")===v?"selected":""}>Std ${v}</option>`).join("")}</select><button type="button" class="portal-primary" data-save-teacher-standard="${t.auth_user_id}">Save</button>`:""}${t.account_status!=="removed"?`<button type="button" class="portal-delete" data-remove-teacher="${t.auth_user_id}">Delete Account</button>`:`<span class="portal-muted">Access removed</span>`}</div></article>`).join("")}</div>`:`<p class="portal-muted">No teacher accounts found.</p>`}<p id="teacherAssignmentMessage" class="portal-muted"></p></section>` : `<p class="portal-warning">Your assigned standard: ${escapeHtml(assignedStandard || "Not assigned yet. Contact Admin / Principal")}. Only assigned students and their marks are accessible.</p>`}
         ${isAdmin ? `<section class="portal-panel"><h2>Publish a school notice</h2><form id="noticeForm" class="portal-form portal-inline-form"><label>Notice title<input id="noticeTitle" required maxlength="100" /></label><label>Details<textarea id="noticeDetails" required rows="3" maxlength="500"></textarea></label><button class="portal-primary" type="submit">Publish notice</button><p id="noticeError" class="portal-error"></p></form><h3>Saved notices</h3><div class="portal-list">${notices.length ? notices.map(n=>`<article><div><b>${escapeHtml(n.title)}</b><p>${escapeHtml(n.details)}</p></div><button class="portal-delete" data-delete-notice="${n.id}">Delete</button></article>`).join("") : `<p class="portal-muted">No notices added yet.</p>`}</div></section>` : ""}
         ${!isAdmin ? `<section class="portal-panel"><h2>Post class homework</h2><form id="homeworkForm" class="portal-form portal-inline-form"><label>Class<input id="homeworkClass" required placeholder="e.g. Standard 9" /></label><label>Subject<input id="homeworkSubject" required placeholder="e.g. Mathematics" /></label><label>Homework details<textarea id="homeworkDetails" required rows="3"></textarea></label><button class="portal-primary" type="submit">Save homework</button><p id="homeworkError" class="portal-error"></p></form></section>` : ""}
         <section class="portal-panel" id="galleryManagePanel">
@@ -566,7 +606,7 @@ async function renderPortal() {
             <p id="marksError" class="portal-error"></p>
           </form>
           <div class="portal-form portal-inline-form">
-            <label>Filter standard<select id="marksFilterStandard"><option value="">All standards</option>${["9","10","11","12"].map(v=>`<option value="${v}">Std ${v}</option>`).join("")}</select></label>
+            <label>Filter standard<select id="marksFilterStandard"><option value="">All standards</option>${(isAdmin ? ["9","10","11","12"] : [assignedStandard]).filter(Boolean).map(v=>`<option value="${v}">Std ${v}</option>`).join("")}</select></label>
             <label>Filter exam<input id="marksFilterExam" placeholder="Search exam name" /></label>
             <label>Division<select id="marksFilterDivision"><option value="">All divisions</option>${[...new Set(students.map(st=>st.division||"A"))].sort().map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("")}</select></label>
             <label>Academic year<input id="marksBulkYear" value="2026-27" maxlength="12" /></label>
@@ -651,6 +691,15 @@ async function renderPortal() {
   document.querySelectorAll("[data-approve-registration]").forEach(btn=>btn.addEventListener("click",async()=>{btn.disabled=true;const {error}=await supabase.rpc("approve_staff_registration",{request_id:btn.dataset.approveRegistration});if(error){alert(error.message);btn.disabled=false;}else await renderPortal();}));
   document.querySelectorAll("[data-reject-registration]").forEach(btn=>btn.addEventListener("click",async()=>{btn.disabled=true;const {error}=await supabase.rpc("reject_staff_registration",{request_id:btn.dataset.rejectRegistration});if(error){alert(error.message);btn.disabled=false;}else await renderPortal();}));
 
+  // Delete Account revokes website access without deleting any student, marks or history.
+  const removeTeacherAccess = async (teacherId, requestId) => {
+    if(!confirm('Delete this teacher account access? Student records, marks and results will be preserved. This does not erase the Supabase Auth identity.')) return;
+    const {error}=await supabase.rpc('remove_teacher_account_access',{target_teacher_id:teacherId || null,target_request_id:requestId || null});
+    if(error) alert('Delete failed: '+error.message); else await renderPortal();
+  };
+  document.querySelectorAll('[data-remove-teacher]').forEach(b=>b.addEventListener('click',()=>removeTeacherAccess(b.dataset.removeTeacher,null)));
+  document.querySelectorAll('[data-remove-pending]').forEach(b=>b.addEventListener('click',()=>removeTeacherAccess(null,b.dataset.removePending)));
+
   // Upload to private Storage, then link the path to the student row.
   const uploadStudentPhoto = async (studentId, file) => {
     if (!file) return;
@@ -679,6 +728,12 @@ async function renderPortal() {
       await supabase.storage.from("student-photos").remove([oldRow.photo_url]);
     }
   };
+  document.querySelectorAll("[data-save-teacher-standard]").forEach(btn=>btn.addEventListener("click",async()=>{
+    const id=btn.dataset.saveTeacherStandard; const selected=document.querySelector(`[data-teacher-standard="${id}"]`).value;
+    const out=document.querySelector("#teacherAssignmentMessage");out.textContent="Saving…";
+    const {error}=await supabase.rpc("assign_teacher_standard",{teacher_id:id,new_standard:selected||null});
+    out.textContent=error?error.message:"Teacher standard saved successfully.";
+  }));
   if (document.querySelector("#studentForm")) {
     document.querySelector("#studentForm").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -1196,6 +1251,55 @@ async function renderPortal() {
       }
     });
   }
+}
+
+function setupPublicResultSearch() {
+  const form = document.querySelector('#publicResultForm');
+  if (!form) return;
+  const status = document.querySelector('#publicResultStatus');
+  const output = document.querySelector('#publicResultOutput');
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    output.innerHTML = '';
+    status.textContent = 'Searching result…';
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      if (!supabase) throw new Error('Supabase configuration is missing.');
+      const lookup = {
+        p_gr: document.querySelector('#publicResultGr').value.trim(),
+        p_roll: document.querySelector('#publicResultRoll').value.trim(),
+        p_year: document.querySelector('#publicResultYear').value.trim(),
+        p_exam: document.querySelector('#publicResultExam').value.trim()
+      };
+      // The Edge Function checks the result before issuing a short-lived private photo URL.
+      const { data, error } = await supabase.functions.invoke('public-result-with-photo', {
+        body: lookup
+      });
+      if (error) throw new Error('Public result service unavailable. Deploy the public-result-with-photo Edge Function first. ' + error.message);
+      if (data?.error) throw new Error(data.error);
+      if (!data || !data.subjects?.length) { status.textContent = 'No matching result found. Check GR, roll number, year and exam.'; return; }
+      const r = data;
+      const rows = r.subjects.map((m,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(m.subject)}</td><td>${escapeHtml(m.max_marks)}</td><td>${escapeHtml(m.marks_obtained)}</td></tr>`).join('');
+      const photo = r.photo_url
+        ? `<img class="public-student-photo" src="${escapeHtml(r.photo_url)}" alt="Student photo" referrerpolicy="no-referrer" />`
+        : `<div class="public-student-photo public-student-photo-empty">PHOTO</div>`;
+      const card = `<article class="public-result-card" id="publicPrintableResult"><header class="public-result-header"><img src="/school-logo.jpeg" alt="School logo"><div><h3>સરકારી માધ્યમિક શાળા, બિલડી</h3><p>Government Secondary School, Bildi</p><b>વિદ્યાર્થી પરીક્ષા પરિણામ / STUDENT RESULT</b></div></header><div class="public-result-profile"><div class="public-result-meta"><span><b>Student:</b> ${escapeHtml(r.full_name)}</span><span><b>GR:</b> ${escapeHtml(r.admission_no)}</span><span><b>Std:</b> ${escapeHtml(r.standard)} / ${escapeHtml(r.division)}</span><span><b>Roll:</b> ${escapeHtml(r.roll_no)}</span><span><b>Year:</b> ${escapeHtml(r.academic_year)}</span><span><b>Exam:</b> ${escapeHtml(r.exam_name)}</span></div>${photo}</div><div class="result-table-wrap"><table class="result-table"><thead><tr><th>No.</th><th>Subject</th><th>Maximum</th><th>Obtained</th></tr></thead><tbody>${rows}</tbody></table></div><div class="public-result-summary"><b>Total: ${escapeHtml(r.obtained)} / ${escapeHtml(r.maximum)}</b><b>Percentage: ${escapeHtml(r.percentage)}%</b><b>${escapeHtml(r.result)}</b></div><div class="public-result-sign"><span>વર્ગશિક્ષકની સહી<br>Class Teacher</span><span>આચાર્યશ્રીની સહી<br>Principal</span></div></article><button id="publicPrintResult" type="button" class="primary-btn">Print / Save PDF</button>`;
+      output.innerHTML = card;
+      status.textContent = 'Result found.';
+      document.querySelector('#publicPrintResult').addEventListener('click', () => {
+        const printable = document.querySelector('#publicPrintableResult').outerHTML;
+        const w = window.open('', '_blank', 'width=900,height=800');
+        if (!w) { alert('Please allow pop-ups to print the result.'); return; }
+        w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Student Result</title><style>${publicResultPrintCss()}</style></head><body>${printable}<script>window.onload=()=>{Promise.all(Array.from(document.images).map(i=>i.complete?Promise.resolve():new Promise(r=>{i.onload=r;i.onerror=r}))).then(()=>window.print())};<\/script></body></html>`);
+        w.document.close();
+      });
+    } catch(e) { status.textContent = e.message; }
+    finally { button.disabled = false; }
+  });
+}
+function publicResultPrintCss() {
+  return `body{font-family:Arial,sans-serif;color:#16345c;margin:25px}.public-result-card{max-width:800px;margin:auto;border:3px solid #245ca3;padding:25px;background:#fff url('/school-logo.jpeg') center/45% no-repeat}.public-result-header{display:flex;gap:20px;align-items:center;border-bottom:4px solid #e3ad43;padding-bottom:14px}.public-result-header img{width:85px;height:85px;object-fit:contain}.public-result-header h3{margin:0}.public-result-profile{display:flex;gap:18px;align-items:flex-start;margin:22px 0}.public-result-meta{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1}.public-student-photo{width:105px;height:125px;object-fit:cover;border:2px solid #245ca3;border-radius:5px}.public-student-photo-empty{display:flex;align-items:center;justify-content:center;color:#64748b;background:#f1f5f9}.result-table{border-collapse:collapse;width:100%}.result-table td,.result-table th{border:1px solid #9aaec9;padding:9px;text-align:left}.result-table th{background:#245ca3;color:white}.public-result-summary{display:flex;justify-content:space-between;background:#e7f0ff;padding:15px;margin-top:20px}.public-result-sign{display:flex;justify-content:space-between;text-align:center;margin-top:80px}.public-result-sign span{border-top:1px solid #333;padding-top:8px}@page{size:A4;margin:12mm}@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}`;
 }
 
 function escapeHtml(value) {
