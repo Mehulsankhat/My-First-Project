@@ -458,7 +458,17 @@ async function renderPortal() {
     return;
   }
 
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  // Validate the token with Supabase Auth, not only local storage. A stale or
+  // signed-out session must never be used to load protected staff data.
+  const { data: { session: storedSession }, error: sessionError } = await supabase.auth.getSession();
+  let session = storedSession;
+  if (session && !sessionError) {
+    const { data: verified, error: verifyError } = await supabase.auth.getUser();
+    if (verifyError || !verified?.user || verified.user.id !== session.user.id) {
+      session = null;
+      await supabase.auth.signOut({ scope: 'local' });
+    }
+  }
   if (sessionError) {
     app.innerHTML = `<main class="portal-page"><section class="login-card"><h1>Could not check login</h1><p>${escapeHtml(sessionError.message)}</p><a href="#home">Back to website</a></section></main>`;
     return;
@@ -469,12 +479,22 @@ async function renderPortal() {
       <main class="portal-page"><a class="portal-back" href="#home">← Back to school website</a>
         <section class="login-card"><img src="/school-logo.jpeg" alt="School logo" class="login-logo" />
           <p class="portal-kicker">GOVERNMENT SECONDARY SCHOOL · BILDI</p><h1>Staff Portal</h1>
-          <div id="staffLoginView"><p class="portal-muted">Principal, Admin or Teacher sign in</p>
+          <div id="staffLoginView"><p class="portal-muted">Select your login section</p>
+            <div class="staff-role-tabs" role="group" aria-label="Staff login role">
+              <button type="button" class="staff-role-tab" data-login-role="admin">Admin</button>
+              <button type="button" class="staff-role-tab" data-login-role="principal">Principal</button>
+              <button type="button" class="staff-role-tab active" data-login-role="teacher">Teacher</button>
+            </div>
+            <p id="roleLoginHint" class="portal-muted">Teacher login · approved teachers only</p>
             <form id="staffLoginForm" class="portal-form">
               <label>Email<input id="loginEmail" type="email" required autocomplete="username" /></label>
-              <label>Password<input id="loginPassword" type="password" required autocomplete="current-password" /></label>
-              <p id="loginError" class="portal-error" aria-live="polite"></p><button class="portal-primary" type="submit">Sign in</button>
-            </form><button id="showRegister" class="portal-secondary" type="button">Create staff account</button>
+              <label>Password<div class="staff-password-row"><input id="loginPassword" type="password" required autocomplete="current-password" /><button id="toggleLoginPassword" type="button" class="portal-secondary" aria-label="Show password">Show</button></div></label>
+              <button id="forgotStaffPassword" type="button" class="staff-text-button">Forgot password?</button>
+              <p id="loginError" class="portal-error" aria-live="polite"></p><button class="portal-primary" type="submit">Sign in as Teacher</button>
+            </form>
+            <button id="showRegister" class="portal-secondary" type="button">Create teacher account</button>
+            <button id="resendStaffApproval" class="portal-secondary" type="button">Resend Approval Request</button>
+            <p id="resendApprovalMessage" class="portal-muted" aria-live="polite"></p>
           </div>
           <div id="staffRegisterView" hidden><p class="portal-muted">Teacher registration (Admin or Principal approval required)</p>
             <form id="staffRegisterForm" class="portal-form">
@@ -490,6 +510,38 @@ async function renderPortal() {
           <p class="portal-warning">New Teacher accounts remain pending until an existing Admin OR Principal approves them on this website. Email verification may still be required if enabled in Supabase Auth.</p>
         </section></main>`;
     const loginView=document.querySelector('#staffLoginView'), registerView=document.querySelector('#staffRegisterView');
+    let selectedLoginRole='teacher';
+    document.querySelectorAll('[data-login-role]').forEach(tab=>tab.addEventListener('click',()=>{
+      selectedLoginRole=tab.dataset.loginRole;
+      document.querySelectorAll('[data-login-role]').forEach(t=>{t.classList.toggle('active',t===tab);t.setAttribute('aria-pressed',String(t===tab));});
+      document.querySelector('#roleLoginHint').textContent=selectedLoginRole==='teacher'?'Teacher login · approved teachers only':'Principal account only · full school management access';
+      document.querySelector('#staffLoginForm button[type=submit]').textContent='Sign in as '+selectedLoginRole[0].toUpperCase()+selectedLoginRole.slice(1);
+      document.querySelector('#showRegister').hidden=selectedLoginRole!=='teacher';
+      document.querySelector('#resendStaffApproval').hidden=selectedLoginRole!=='teacher';
+      document.querySelector('#loginError').textContent='';
+    }));
+    document.querySelector('#toggleLoginPassword').onclick=()=>{
+      const password=document.querySelector('#loginPassword');const showing=password.type==='password';password.type=showing?'text':'password';
+      document.querySelector('#toggleLoginPassword').textContent=showing?'Hide':'Show';
+      document.querySelector('#toggleLoginPassword').setAttribute('aria-label',showing?'Hide password':'Show password');
+    };
+    document.querySelector('#forgotStaffPassword').onclick=async()=>{
+      const email=document.querySelector('#loginEmail').value.trim(),box=document.querySelector('#loginError');
+      if(!email){box.textContent='Enter your email address first.';return;}
+      const {error}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin+window.location.pathname+'#admin'});
+      box.textContent=error?error.message:'If this email has an account, password reset instructions will be sent.';
+    };
+    document.querySelector('#resendStaffApproval').onclick=async()=>{
+      const box=document.querySelector('#resendApprovalMessage'),email=document.querySelector('#loginEmail').value.trim(),password=document.querySelector('#loginPassword').value;
+      if(!email||!password){box.textContent='Enter your registered email and password first.';return;}
+      const button=document.querySelector('#resendStaffApproval');button.disabled=true;box.textContent='Checking your pending request…';
+      try{
+        const {error:authError}=await supabase.auth.signInWithPassword({email,password});if(authError)throw authError;
+        const {data,error}=await supabase.rpc('resend_my_teacher_approval_request');if(error)throw error;
+        box.textContent=data||'Your pending approval request has been refreshed for Principal review.';
+      }catch(err){box.textContent=err.message||'Could not resend request. Please contact Principal.';}
+      finally{await supabase.auth.signOut();button.disabled=false;}
+    };
     document.querySelector('#showRegister').onclick=()=>{loginView.hidden=true;registerView.hidden=false;};
     document.querySelector('#showLogin').onclick=()=>{registerView.hidden=true;loginView.hidden=false;};
     document.querySelector('#staffRegisterForm').addEventListener('submit',async e=>{
@@ -504,7 +556,12 @@ async function renderPortal() {
       e.preventDefault();const button=e.currentTarget.querySelector('button[type=submit]'),errorBox=document.querySelector('#loginError');button.disabled=true;errorBox.textContent='';
       const {data,error}=await supabase.auth.signInWithPassword({email:document.querySelector('#loginEmail').value.trim(),password:document.querySelector('#loginPassword').value});
       if(error){errorBox.textContent=error.message;button.disabled=false;return;}
-      try{await getStaffProfile(data.user.id);await renderPortal();}catch{const message=await staffLoginMessage();await supabase.auth.signOut();errorBox.textContent=message;button.disabled=false;}
+      try{
+        const profile=await getStaffProfile(data.user.id);
+        const validRole=selectedLoginRole==='teacher'?profile.role==='teacher':['admin','principal'].includes(profile.role);
+        if(!validRole){await supabase.auth.signOut();errorBox.textContent=selectedLoginRole==='teacher'?'Only approved teachers can use Teacher Login.':'Only the authorized Principal account can use Admin and Principal Login.';button.disabled=false;return;}
+        await renderPortal();
+      }catch{const message=await staffLoginMessage();await supabase.auth.signOut();errorBox.textContent=message;button.disabled=false;}
     });
     return;
   }
@@ -537,6 +594,14 @@ async function renderPortal() {
   ]);
   let registrationRequests=[]; let registrationError=null; let teacherDirectory=[]; let teacherDirectoryError=null;
   if(isAdmin){
+    // Refresh a stale token before privileged requests. Never fall back to
+    // anon grants for private teacher contact information.
+    const { data: currentAuth, error: authCheckError } = await supabase.auth.getUser();
+    if (authCheckError || currentAuth?.user?.id !== session.user.id) {
+      app.innerHTML = `<main class="portal-page"><section class="login-card"><h1>Session expired</h1><p>Your staff login is no longer valid. Sign in again to manage teacher accounts.</p><button class="portal-primary" id="sessionRelogin" type="button">Return to login</button></section></main>`;
+      document.querySelector('#sessionRelogin').onclick = async () => { await supabase.auth.signOut({scope:'local'}); await renderPortal(); };
+      return;
+    }
     const [rr, directory] = await Promise.all([
       supabase.from("staff_registration_requests").select("id,full_name,email,phone,requested_role,status,created_at").eq("status","pending").eq("requested_role","teacher").order("created_at",{ascending:true}),
       supabase.rpc("list_teacher_accounts_for_management")
@@ -557,11 +622,7 @@ async function renderPortal() {
   const allowedStudentIds = new Set(students.map(st=>String(st.id)));
   const examMarks = isAdmin ? (marksResult.data || []) : (marksResult.data || []).filter(m=>allowedStudentIds.has(String(m.student_id)));
   const galleryItems = galleryResult.data || [];
-  const today = new Date().toLocaleDateString("en-CA");
-  const attendanceResult = await supabase.from("attendance")
-    .select("id,student_id,status,remarks")
-    .eq("attendance_date", today);
-  const attendanceRows = isAdmin ? (attendanceResult.data || []) : (attendanceResult.data || []).filter(a=>allowedStudentIds.has(String(a.student_id)));
+  const today = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   // All teacher accounts (including unassigned, pending, rejected and removed)
   // are returned by a role-checked SECURITY DEFINER function.
   app.innerHTML = `
@@ -572,8 +633,8 @@ async function renderPortal() {
         <div class="portal-stats"><article><span>📢</span><b>${notices.length}</b><small>Notices</small></article><article><span>📘</span><b>${homework.length}</b><small>Homework posts</small></article><article><span>🎓</span><b>${students.length}</b><small>Students</small></article><article><span>🔐</span><b>${isAdmin ? "Full" : `Std ${assignedStandard || "Not assigned"}`}</b><small>Access level</small></article></div>
         ${noticeResult.error ? `<p class="portal-error">Notices: ${escapeHtml(noticeResult.error.message)}</p>` : ""}
         ${homeworkResult.error ? `<p class="portal-error">Homework: ${escapeHtml(homeworkResult.error.message)}</p>` : ""}
-        ${isAdmin ? `<section class="portal-panel"><h2>Teacher Registration Approvals</h2><p class="portal-muted">Only one approval is needed: Admin OR Principal. Approval is given here, not in the Supabase Dashboard.</p>${registrationError?`<p class="portal-error">Run supabase/staff-registration-approval.sql first: ${escapeHtml(registrationError.message)}</p>`:registrationRequests.length?`<div class="portal-list">${registrationRequests.map(r=>`<article><div><b>${escapeHtml(r.full_name)}</b><p>${escapeHtml(r.email)} · ${escapeHtml(r.phone||"No phone")} · Requested: ${escapeHtml(r.requested_role.toUpperCase())}</p></div><div class="student-actions"><button class="portal-primary" data-approve-registration="${r.id}">Approve</button><button class="portal-delete" data-reject-registration="${r.id}">Reject</button><button class="portal-delete" data-remove-pending="${r.id}">Delete Account</button></div></article>`).join("")}</div>`:`<p class="portal-muted">No pending registrations.</p>`}</section>` : ""}
-        ${isAdmin ? `<section class="portal-panel"><h2>Staff Account Management — All Teachers</h2><p class="portal-muted">Principal / Admin can see all teachers, including Not Assigned, Pending, Rejected and Removed. Deleting teacher access never deletes student records.</p>${teacherDirectoryError?`<p class="portal-error">Run supabase/all-teachers-management.sql: ${escapeHtml(teacherDirectoryError.message)}</p>`:teacherDirectory.length?`<div class="portal-list">${teacherDirectory.map(t=>`<article><div><b>${escapeHtml(t.full_name||t.email||"Teacher")}</b><p>${escapeHtml(t.email||"")} · Status: <strong>${escapeHtml(t.account_status)}</strong> · Standard: <strong>${escapeHtml(t.assigned_standard ? "Std "+t.assigned_standard : "Not Assigned")}</strong></p></div><div class="student-actions">${t.account_status==="approved"?`<select data-teacher-standard="${t.auth_user_id}"><option value="">Not Assigned</option>${["9","10","11","12"].map(v=>`<option value="${v}" ${String(t.assigned_standard||"")===v?"selected":""}>Std ${v}</option>`).join("")}</select><button type="button" class="portal-primary" data-save-teacher-standard="${t.auth_user_id}">Save</button>`:""}${t.account_status!=="removed"?`<button type="button" class="portal-delete" data-remove-teacher="${t.auth_user_id}">Delete Account</button>`:`<span class="portal-muted">Access removed</span>`}</div></article>`).join("")}</div>`:`<p class="portal-muted">No teacher accounts found.</p>`}<p id="teacherAssignmentMessage" class="portal-muted"></p></section>` : `<p class="portal-warning">Your assigned standard: ${escapeHtml(assignedStandard || "Not assigned yet. Contact Admin / Principal")}. Only assigned students and their marks are accessible.</p>`}
+        ${isAdmin ? `<section class="portal-panel"><h2>Teacher Registration Approvals</h2><p class="portal-muted">Only one approval is needed: Admin OR Principal. Approval is given here, not in the Supabase Dashboard.</p>${registrationError?`<p class="portal-error">Database access error: ${escapeHtml(registrationError.message)}. Run supabase/FIX-STAFF-PORTAL-PERMISSIONS.sql in Supabase SQL Editor, then refresh.</p>`:registrationRequests.length?`<div class="portal-list">${registrationRequests.map(r=>`<article><div><b>${escapeHtml(r.full_name)}</b><p>${escapeHtml(r.email)} · ${escapeHtml(r.phone||"No phone")} · Requested: ${escapeHtml(r.requested_role.toUpperCase())}</p></div><div class="student-actions"><button class="portal-primary" data-approve-registration="${r.id}">Approve</button><button class="portal-delete" data-reject-registration="${r.id}">Reject</button><button class="portal-delete" data-remove-pending="${r.id}">Delete Account</button></div></article>`).join("")}</div>`:`<p class="portal-muted">No pending registrations.</p>`}</section>` : ""}
+        ${isAdmin ? `<section class="portal-panel"><h2>Staff Account Management — All Teachers</h2><p class="portal-muted">Principal / Admin can see all teachers, including Not Assigned, Pending, Rejected and Removed. Deleting teacher access never deletes student records.</p>${teacherDirectoryError?`<p class="portal-error">Database access error: ${escapeHtml(teacherDirectoryError.message)}. Run supabase/FIX-STAFF-PORTAL-PERMISSIONS.sql in Supabase SQL Editor, then refresh.</p>`:teacherDirectory.length?`<div class="portal-list">${teacherDirectory.map(t=>`<article><div><b>${escapeHtml(t.full_name||t.email||"Teacher")}</b><p>${escapeHtml(t.email||"")} · Status: <strong>${escapeHtml(t.account_status)}</strong> · Standard: <strong>${escapeHtml(t.assigned_standard ? "Std "+t.assigned_standard : "Not Assigned")}</strong></p></div><div class="student-actions">${t.account_status==="approved"?`<select data-teacher-standard="${t.auth_user_id}"><option value="">Not Assigned</option>${["9","10","11","12"].map(v=>`<option value="${v}" ${String(t.assigned_standard||"")===v?"selected":""}>Std ${v}</option>`).join("")}</select><button type="button" class="portal-primary" data-save-teacher-standard="${t.auth_user_id}">Save</button>`:""}${t.account_status!=="removed"?`<button type="button" class="portal-delete" data-remove-teacher="${t.auth_user_id}">Delete Account</button>`:`<span class="portal-muted">Access removed</span>`}</div></article>`).join("")}</div>`:`<p class="portal-muted">No teacher accounts found.</p>`}<p id="teacherAssignmentMessage" class="portal-muted"></p></section>` : `<p class="portal-warning">Your assigned standard: ${escapeHtml(assignedStandard || "Not assigned yet. Contact Admin / Principal")}. Only assigned students and their marks are accessible.</p>`}
         ${isAdmin ? `<section class="portal-panel"><h2>Publish a school notice</h2><form id="noticeForm" class="portal-form portal-inline-form"><label>Notice title<input id="noticeTitle" required maxlength="100" /></label><label>Details<textarea id="noticeDetails" required rows="3" maxlength="500"></textarea></label><button class="portal-primary" type="submit">Publish notice</button><p id="noticeError" class="portal-error"></p></form><h3>Saved notices</h3><div class="portal-list">${notices.length ? notices.map(n=>`<article><div><b>${escapeHtml(n.title)}</b><p>${escapeHtml(n.details)}</p></div><button class="portal-delete" data-delete-notice="${n.id}">Delete</button></article>`).join("") : `<p class="portal-muted">No notices added yet.</p>`}</div></section>` : ""}
         ${!isAdmin ? `<section class="portal-panel"><h2>Post class homework</h2><form id="homeworkForm" class="portal-form portal-inline-form"><label>Class<input id="homeworkClass" required placeholder="e.g. Standard 9" /></label><label>Subject<input id="homeworkSubject" required placeholder="e.g. Mathematics" /></label><label>Homework details<textarea id="homeworkDetails" required rows="3"></textarea></label><button class="portal-primary" type="submit">Save homework</button><p id="homeworkError" class="portal-error"></p></form></section>` : ""}
         <section class="portal-panel" id="galleryManagePanel">
@@ -611,7 +672,7 @@ async function renderPortal() {
             <label>Division<select id="marksFilterDivision"><option value="">All divisions</option>${[...new Set(students.map(st=>st.division||"A"))].sort().map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("")}</select></label>
             <label>Academic year<input id="marksBulkYear" value="2026-27" maxlength="12" /></label>
             <label>Exact exam name<input id="marksBulkExam" placeholder="e.g. First Exam" maxlength="80" /></label>
-            <label>Subjects (comma separated)<input id="marksBulkSubjects" value="ગુજરાતી,અંગ્રેજી,હિન્દી,સંસ્કૃત,ગણિત,વિજ્ઞાન,સામાજિક વિજ્ઞાન" /></label>
+            <label>Subjects (comma separated)<input id="marksBulkSubjects" value="ગુજરાતી,અંગ્રેજી,હિન્દી,સંસ્કૃત,ગણિત,વિજ્ઞાન,સામાજિક વિજ્ઞાન,IT/ITes" /></label>
             <label>Maximum marks per subject<input id="marksBulkMaximum" type="number" value="50" min="1" step="0.01" /></label>
             <button class="portal-primary" type="button" id="downloadPrefilledMarksCsv">Download Students + Marks CSV Template</button>
             <label>Upload filled marks CSV<input id="marksBulkFile" type="file" accept=".csv,text/csv" /></label>
@@ -621,7 +682,7 @@ async function renderPortal() {
             <div id="marksBulkPreview" class="result-table-wrap"></div>
             <button class="portal-primary" type="button" id="downloadMarksCsv">Download existing marks (Excel CSV)</button>
           </div>
-          <div class="portal-list" id="examMarksList">${examMarks.length ? examMarks.map(m=>{const st=students.find(x=>String(x.id)===String(m.student_id));return `<article data-mark-row><div><b>${escapeHtml(st?.full_name||"Unknown student")} · ${escapeHtml(m.subject)}</b><p>GR ${escapeHtml(st?.admission_no||"—")} · Std ${escapeHtml(st?.standard||"—")} · ${escapeHtml(m.exam_name)} · ${escapeHtml(m.academic_year)}</p><small>${m.marks_obtained} / ${m.max_marks}${m.remarks?` · ${escapeHtml(m.remarks)}`:""}</small></div><div class="student-actions"><button type="button" class="portal-primary" data-edit-mark="${m.id}">Edit</button><button type="button" class="portal-delete" data-delete-mark="${m.id}">Delete</button></div></article>`}).join("") : `<p class="portal-muted">No marks added yet.</p>`}</div>
+          <div class="portal-list" id="examMarksList">${(()=>{const groups=new Map();examMarks.forEach(m=>{const key=[m.student_id,m.academic_year,m.exam_name].join('|');if(!groups.has(key))groups.set(key,[]);groups.get(key).push(m)});return [...groups.values()].map((group,i)=>{const st=students.find(x=>String(x.id)===String(group[0].student_id));const total=group.reduce((n,m)=>n+Number(m.marks_obtained),0),max=group.reduce((n,m)=>n+Number(m.max_marks),0);return `<article class="student-result-group"><div class="student-result-heading">${studentPhotoUrls[st?.id]?`<img class="result-card-photo" src="${escapeHtml(studentPhotoUrls[st.id])}" alt="Student photo">`:''}<div><b>${escapeHtml(st?.full_name||'Unknown student')}</b><p>GR ${escapeHtml(st?.admission_no||'—')} · Std ${escapeHtml(st?.standard||'—')} · ${escapeHtml(group[0].exam_name)} · ${escapeHtml(group[0].academic_year)}</p></div></div><div class="student-result-stats"><span><small>Total Marks</small><strong>${total.toFixed(2)} / ${max.toFixed(2)}</strong></span><span><small>Percentage</small><strong>${max?(total/max*100).toFixed(2):'0.00'}%</strong></span><span><small>Subjects</small><strong>${group.length}</strong></span></div><button class="portal-primary" type="button" data-view-mark-group="${i}">View Result</button> <button class="portal-secondary" type="button" data-edit-mark-group="${i}">Edit Marks</button><div data-mark-group-detail="${i}" class="student-result-detail" hidden><div class="result-table-wrap"><table class="result-table"><thead><tr><th>Subject</th><th>Obtained</th><th>Maximum</th><th>Actions</th></tr></thead><tbody>${group.map(m=>`<tr><td>${escapeHtml(m.subject)}</td><td>${m.marks_obtained}</td><td>${m.max_marks}</td><td><button type="button" class="portal-primary" data-edit-mark="${m.id}">Edit</button> <button type="button" class="portal-delete" data-delete-mark="${m.id}">Delete</button></td></tr>`).join('')}</tbody></table></div></div></article>`}).join('')||'<p class="portal-muted">No marks added yet.</p>'})()}</div>
           <section class="result-report-panel" id="resultReportPanel">
             <h3>Automatic Result, Percentage & Top 10</h3>
             <p class="portal-muted">Select one standard, academic year and exam. Percentage is calculated from total obtained marks ÷ total maximum marks. A student passes only when every subject meets the pass percentage.</p>
@@ -670,19 +731,14 @@ async function renderPortal() {
           <label class="student-search-label">Search students<input id="studentSearch" type="search" placeholder="Search by GR number, name, standard or division..." /></label>
           <div class="portal-list" id="studentList">${students.length ? students.map(st=>`<article data-student-row data-search="${escapeHtml([st.admission_no,st.full_name,st.standard,st.stream,st.division,st.roll_no].join(" ").toLowerCase())}"><div class="student-detail-with-photo">${studentPhotoUrls[st.id] ? `<img class="student-profile-photo" src="${escapeHtml(studentPhotoUrls[st.id])}" alt="Photo of ${escapeHtml(st.full_name)}" />` : `<span class="student-profile-placeholder">No photo</span>`}<div><b>${escapeHtml(st.full_name)}</b><p>GR: ${escapeHtml(st.admission_no)} · Std ${escapeHtml(st.standard)}${st.stream && st.stream !== "General" ? " · "+escapeHtml(st.stream) : ""}-${escapeHtml(st.division || "A")} · Roll: ${st.roll_no ?? "—"}</p>${(st.guardian_name || st.guardian_phone) ? `<small>Guardian: ${escapeHtml(st.guardian_name || "—")} · Phone: ${escapeHtml(st.guardian_phone || "—")}</small>` : ""}</div></div><div class="student-actions"> <button type="button" class="portal-primary" data-id-card="${st.id}">Print ID</button>${isAdmin ? `<button type="button" class="portal-primary" data-edit-student="${st.id}">Edit</button><button type="button" class="portal-primary" data-student-photo="${st.id}">${st.photo_url ? "Change Photo" : "Add Photo"}</button>${st.photo_url ? `<button type="button" class="portal-delete" data-remove-student-photo="${st.id}">Remove Photo</button>` : ""}<button class="portal-delete" data-delete-student="${st.id}">Delete</button>` : ""}</div></article>`).join("") : `<p class="portal-muted">No students added yet.</p>`}</div>
         </section>
-        <section class="portal-panel">
-          <h2>Daily Attendance · ${today}</h2>
-          ${studentResult.error ? `<p class="portal-muted">Student list will appear after the database schema is installed.</p>` : ""}
-          <p class="portal-muted">Select Present, Absent, Late or Leave for each student, then save attendance.</p>
-          <form id="attendanceForm" class="portal-form">
-            ${students.filter(st=>st.status==="active").map(st=>{
-              const saved=attendanceRows.find(a=>a.student_id===st.id);
-              return `<label class="attendance-row"><span>${escapeHtml(st.full_name)} · ${escapeHtml(st.standard)}-${escapeHtml(st.division || "A")} (GR ${escapeHtml(st.admission_no)})</span><select name="attendance-${st.id}"><option value="present" ${saved?.status==="present"?"selected":""}>Present</option><option value="absent" ${saved?.status==="absent"?"selected":""}>Absent</option><option value="late" ${saved?.status==="late"?"selected":""}>Late</option><option value="leave" ${saved?.status==="leave"?"selected":""}>Leave</option></select></label>`;
-            }).join("")}
-            ${students.length ? `<button class="portal-primary" type="submit">Save today's attendance</button>` : ""}
-            <p id="attendanceError" class="portal-error"></p><p id="attendanceSuccess" class="portal-muted"></p>
-          </form>
-          <p class="portal-muted">Today's records saved: ${attendanceRows.length}</p>
+        <section class="portal-panel" id="attendancePanel">
+          <h2>Daily Attendance & Reports</h2>
+          <div class="attendance-tools"><label>Attendance date <input id="attendanceDate" type="date" value="${today}" max="${today}" required></label><button type="button" class="portal-primary" id="attendanceSearch">Search date</button><label>Standard <select id="attendanceStandard"><option value="">${isAdmin?'All standards':'Assigned standard'}</option>${[...new Set(students.map(st=>String(st.standard)))].map(v=>`<option value="${escapeHtml(v)}">Std ${escapeHtml(v)}</option>`).join('')}</select></label></div>
+          <p id="attendanceError" class="portal-error" role="alert"></p><p id="attendanceSuccess" class="portal-muted" aria-live="polite"></p>
+          <div id="attendanceSummary" class="attendance-tools"></div>
+          <form id="attendanceForm" class="portal-form"><div id="attendanceList"></div><div class="attendance-tools"><button type="button" class="portal-primary" id="attendanceAll">Mark all present</button><button type="submit" class="portal-primary" id="attendanceSave">Save selected date attendance</button></div></form>
+          <div class="attendance-tools"><button type="button" class="portal-primary" id="attendanceCsv">Download Excel (CSV)</button><button type="button" class="portal-primary" id="attendancePrint">Print / Save PDF</button></div>
+          <h3>Monthly attendance report</h3><div class="attendance-tools"><label>Month <input type="month" id="attendanceMonth" value="${today.slice(0,7)}" max="${today.slice(0,7)}"></label><button type="button" class="portal-primary" id="attendanceMonthly">Download monthly Excel (CSV)</button></div>
         </section>
         <section class="portal-panel"><h2>${isAdmin ? "Recent homework" : "Saved homework"}</h2><div class="portal-list">${homework.length ? homework.map(h=>`<article><div><b>${escapeHtml(h.class_name)} · ${escapeHtml(h.subject)}</b><p>${escapeHtml(h.details)}</p></div><small>${new Date(h.created_at).toLocaleDateString()}</small></article>`).join("") : `<p class="portal-muted">No homework posted yet.</p>`}</div></section>
       </div>
@@ -937,6 +993,8 @@ async function renderPortal() {
     await renderPortal();
   });
   document.querySelector("#cancelMarksEdit")?.addEventListener("click",resetMarksForm);
+  document.querySelectorAll('[data-view-mark-group]').forEach(btn=>btn.addEventListener('click',()=>{const d=document.querySelector(`[data-mark-group-detail="${btn.dataset.viewMarkGroup}"]`);if(d){d.hidden=!d.hidden;btn.textContent=d.hidden?'View Result':'Hide Result'}}));
+  document.querySelectorAll('[data-edit-mark-group]').forEach(btn=>btn.addEventListener('click',()=>{const d=document.querySelector(`[data-mark-group-detail="${btn.dataset.editMarkGroup}"]`);if(d){d.hidden=false;d.querySelector('[data-edit-mark]')?.click();document.querySelector('#marksForm')?.scrollIntoView({behavior:'smooth'})}}));
   document.querySelectorAll("[data-edit-mark]").forEach(btn=>btn.addEventListener("click",()=>{
     const m=examMarks.find(x=>String(x.id)===btn.dataset.editMark);if(!m)return;
     document.querySelector("#markEditId").value=m.id;document.querySelector("#markStudent").value=m.student_id;document.querySelector("#markYear").value=m.academic_year;document.querySelector("#markExam").value=m.exam_name;document.querySelector("#markSubject").value=m.subject;document.querySelector("#markObtained").value=m.marks_obtained;document.querySelector("#markMaximum").value=m.max_marks;document.querySelector("#markRemarks").value=m.remarks||"";document.querySelector("#saveMarksBtn").textContent="Update marks";document.querySelector("#cancelMarksEdit").hidden=false;document.querySelector("#examMarksPanel").scrollIntoView({behavior:"smooth"});
@@ -1084,13 +1142,17 @@ async function renderPortal() {
     generatedResultRows.forEach((r,i) => r.rank = i+1);
     const passCount = generatedResultRows.filter(r=>r.result==="PASS").length;
     message.textContent = `${generatedResultRows.length} students · ${passCount} PASS · ${generatedResultRows.length-passCount} FAIL · Pass mark ${passPercent}%`;
-    list.innerHTML = `<div class="result-table-wrap"><table class="result-table"><thead><tr><th>Rank</th><th>GR No.</th><th>Student</th><th>Roll</th><th>Total</th><th>Out of</th><th>Percentage</th><th>Result</th><th>Subject details</th><th>Result PDF</th></tr></thead><tbody>${generatedResultRows.map(r=>`<tr><td>${r.rank}</td><td>${escapeHtml(r.student.admission_no)}</td><td>${escapeHtml(r.student.full_name)}</td><td>${escapeHtml(r.student.roll_no ?? "—")}</td><td>${r.obtained.toFixed(2)}</td><td>${r.maximum.toFixed(2)}</td><td>${r.percentage.toFixed(2)}%</td><td><strong class="${r.result==="PASS"?"result-pass":"result-fail"}">${r.result}</strong></td><td>${r.subjects.map(x=>`${escapeHtml(x.subject)}: ${x.obtained}/${x.maximum} (${x.percentage.toFixed(1)}%)`).join("<br>")}</td><td><button type="button" class="portal-primary" data-print-result="${escapeHtml(String(r.student.id))}">Print / Save PDF</button></td></tr>`).join("")}</tbody></table></div>`;
+    list.innerHTML = `<div class="student-result-cards">${generatedResultRows.map(r=>`<article class="student-result-group"><div class="student-result-heading">${studentPhotoUrls[r.student.id]?`<img class="result-card-photo" src="${escapeHtml(studentPhotoUrls[r.student.id])}" alt="Student photo">`:''}<div><b>${escapeHtml(r.student.full_name)}</b><p>GR ${escapeHtml(r.student.admission_no)} · Std ${escapeHtml(r.student.standard)} · ${escapeHtml(exam)} · ${escapeHtml(year)}</p></div><strong class="${r.result==='PASS'?'result-pass':'result-fail'}">${r.result}</strong></div><div class="student-result-stats"><span><small>Total Marks</small><strong>${r.obtained.toFixed(2)} / ${r.maximum.toFixed(2)}</strong></span><span><small>Percentage</small><strong>${r.percentage.toFixed(2)}%</strong></span><span><small>Rank</small><strong>${r.rank}</strong></span></div><div class="student-actions"><button class="portal-primary" type="button" data-view-result="${r.student.id}">View Result</button><button class="portal-secondary" type="button" data-edit-result="${r.student.id}">Edit Marks</button><button class="portal-primary" type="button" data-print-result="${r.student.id}">Print Result</button></div><div class="student-result-detail" data-result-detail="${r.student.id}" hidden><p><b>Roll:</b> ${escapeHtml(String(r.student.roll_no??'—'))} · <b>Division:</b> ${escapeHtml(r.student.division||'A')}</p><div class="result-table-wrap"><table class="result-table"><thead><tr><th>Subject</th><th>Obtained</th><th>Maximum</th><th>Percentage</th></tr></thead><tbody>${r.subjects.map(m=>`<tr><td>${escapeHtml(m.subject)}</td><td>${m.obtained}</td><td>${m.maximum}</td><td>${m.percentage.toFixed(2)}%</td></tr>`).join('')}</tbody></table></div></div></article>`).join('')}</div>`;
     document.querySelector("#downloadResultCsv").disabled = false;
     document.querySelector("#downloadTop10Csv").disabled = false;
   };
   // Print-ready individual report card with private student photo and school logo.
   // The browser's Save as PDF preserves embedded photo and styling; CSV cannot embed images.
   document.querySelector("#resultReportList")?.addEventListener("click", event => {
+    const view=event.target.closest('[data-view-result]');
+    if(view){const detail=[...document.querySelectorAll('[data-result-detail]')].find(x=>x.dataset.resultDetail===view.dataset.viewResult);if(detail){detail.hidden=!detail.hidden;view.textContent=detail.hidden?'View Result':'Hide Result'}return;}
+    const edit=event.target.closest('[data-edit-result]');
+    if(edit){const r=generatedResultRows.find(x=>String(x.student.id)===edit.dataset.editResult);const m=r&&examMarks.find(x=>String(x.student_id)===String(r.student.id)&&x.academic_year===document.querySelector('#resultYear').value&&x.exam_name.toLowerCase()===document.querySelector('#resultExam').value.toLowerCase());if(m){const btn=[...document.querySelectorAll('[data-edit-mark]')].find(x=>x.dataset.editMark===String(m.id));btn?.click();document.querySelector('#marksForm')?.scrollIntoView({behavior:'smooth'})}return;}
     const button = event.target.closest("[data-print-result]");
     if (!button) return;
     const r = generatedResultRows.find(item => String(item.student.id) === button.dataset.printResult);
@@ -1149,21 +1211,58 @@ async function renderPortal() {
     csvDownload(rows,"student-top-10-ranking.csv");
   });
 
-  document.querySelector("#attendanceForm")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const button = event.currentTarget.querySelector("button[type=submit]");
-    if (!button) return;
-    button.disabled = true;
-    const records = students.filter(st=>st.status==="active").map(st => ({
-      student_id: st.id,
-      attendance_date: today,
-      status: event.currentTarget.elements[`attendance-${st.id}`]?.value || "present",
-      marked_by: session.user.id
-    }));
-    const { error } = records.length ? await supabase.from("attendance").upsert(records, { onConflict: "student_id,attendance_date" }) : { error: null };
-    if (error) { document.querySelector("#attendanceError").textContent = error.message; button.disabled = false; }
-    else { document.querySelector("#attendanceSuccess").textContent = "Attendance saved successfully."; button.disabled = false; }
-  });
+  const att = id => document.getElementById(id);
+  let loadedDate = '', savedAttendance = [], busyAttendance = false, attendanceDirty = false;
+  const statuses = ['present','absent','late','leave'];
+  const scopedStudents = () => students.filter(st=>!att('attendanceStandard').value || String(st.standard)===att('attendanceStandard').value);
+  const dateLabel = d => d.split('-').reverse().join('-');
+  const attError = msg => {att('attendanceError').textContent=msg;};
+  const attBusy = busy => {busyAttendance=busy; ['attendanceDate','attendanceStandard','attendanceSearch','attendanceAll','attendanceSave','attendanceCsv','attendancePrint','attendanceMonthly','attendanceMonth'].forEach(id=>att(id).disabled=busy); att('attendanceList').querySelectorAll('select').forEach(el=>el.disabled=busy);};
+  const fetchAttendance = async (start,end) => {
+    const rows=[];
+    for(let offset=0;;offset+=500){
+      const {data,error}=await supabase.from('attendance').select('id,student_id,attendance_date,status').gte('attendance_date',start).lte('attendance_date',end).order('id').range(offset,offset+499);
+      if(error) throw error;
+      rows.push(...data.filter(r=>allowedStudentIds.has(String(r.student_id))));
+      if(data.length<500) return rows;
+    }
+  };
+  const reportRows = rows => {const byId=new Map(scopedStudents().map(st=>[String(st.id),st])); return rows.filter(r=>byId.has(String(r.student_id))).map(r=>{const st=byId.get(String(r.student_id));return [dateLabel(r.attendance_date),st.admission_no,st.full_name,st.standard,st.division||'A',r.status];});};
+  const headings=['Date','GR No','Student Name','Standard','Division','Status'];
+  const renderAttendance = () => {
+    const saved=new Map(savedAttendance.map(r=>[String(r.student_id),r.status]));
+    const visible=scopedStudents().filter(st=>st.status==='active'||saved.has(String(st.id)));
+    att('attendanceList').innerHTML=visible.map(st=>`<label class="attendance-row"><span>${escapeHtml(st.full_name)} · Std ${escapeHtml(st.standard)}-${escapeHtml(st.division||'A')} (GR ${escapeHtml(st.admission_no)})</span><select data-att-student="${escapeHtml(st.id)}"><option value="">Not marked</option>${statuses.map(v=>`<option value="${v}" ${saved.get(String(st.id))===v?'selected':''}>${v[0].toUpperCase()+v.slice(1)}</option>`).join('')}</select></label>`).join('')||'<p>No students available.</p>';
+    const rows=reportRows(savedAttendance); att('attendanceSummary').textContent=`${dateLabel(loadedDate)} | Saved: ${rows.length} | `+statuses.map(v=>`${v}: ${rows.filter(r=>r[5]===v).length}`).join(' | ');
+    att('attendanceSuccess').textContent=rows.length?'Saved attendance loaded.':'No saved attendance for this date.';
+    attendanceDirty=false;
+  };
+  const loadAttendance = async () => {
+    if(busyAttendance)return;
+    const date=att('attendanceDate').value;
+    if(!date||date>today){attError('Select a valid date, not in the future.');return;}
+    if(attendanceDirty&&!confirm('Discard unsaved attendance changes?'))return;
+    attBusy(true);attError('');loadedDate='';att('attendanceList').innerHTML='';att('attendanceSummary').textContent='';att('attendanceSuccess').textContent='Loading…';
+    try{savedAttendance=await fetchAttendance(date,date);loadedDate=date;renderAttendance();}catch(e){attError(e.message);att('attendanceSuccess').textContent='';}finally{attBusy(false);}
+  };
+  att('attendanceSearch').onclick=loadAttendance;
+  att('attendanceList').onchange=()=>{attendanceDirty=true;};
+  let previousAttendanceStandard = '';
+  att('attendanceStandard').onchange=()=>{if(attendanceDirty&&!confirm('Discard unsaved changes?')){att('attendanceStandard').value=previousAttendanceStandard;return;}previousAttendanceStandard=att('attendanceStandard').value;if(loadedDate)renderAttendance();};
+  att('attendanceAll').onclick=()=>{if(loadedDate===att('attendanceDate').value){att('attendanceList').querySelectorAll('select').forEach(el=>el.value='present');attendanceDirty=true;}};
+  att('attendanceForm').onsubmit=async event=>{
+    event.preventDefault();if(busyAttendance)return;
+    if(!loadedDate||loadedDate!==att('attendanceDate').value){attError('Search the selected date first.');return;}
+    const records=[...att('attendanceList').querySelectorAll('select')].filter(el=>statuses.includes(el.value)).map(el=>({student_id:el.dataset.attStudent,attendance_date:loadedDate,status:el.value,marked_by:session.user.id}));
+    if(!records.length){attError('Mark at least one student.');return;}
+    attBusy(true);attError('');try{const {error}=await supabase.from('attendance').upsert(records,{onConflict:'student_id,attendance_date'});if(error)throw error;attendanceDirty=false;savedAttendance=await fetchAttendance(loadedDate,loadedDate);renderAttendance();att('attendanceSuccess').textContent='Attendance saved successfully.';}catch(e){attError(e.message);}finally{attBusy(false);}
+  };
+  const dailyReport=()=>{if(!loadedDate||loadedDate!==att('attendanceDate').value){attError('Search the selected date first.');return null;}const rows=reportRows(savedAttendance);if(!rows.length){attError('No saved attendance to download.');return null;}return rows;};
+  const safeCsv = rows => rows.map(r=>r.map(v=>/^[=+@-]/.test(String(v??''))?"'"+v:v));
+  att('attendanceCsv').onclick=()=>{const rows=dailyReport();if(rows)csvDownload(safeCsv([headings,...rows]),`attendance-${loadedDate}.csv`);};
+  att('attendancePrint').onclick=()=>{const rows=dailyReport();if(!rows)return;const w=window.open('','_blank');if(!w){attError('Allow pop-ups to print.');return;}w.document.write(`<html><head><meta charset="utf-8"><title>Attendance ${loadedDate}</title><style>body{font:14px Arial,sans-serif}table{border-collapse:collapse;width:100%}td,th{border:1px solid #999;padding:8px}thead{display:table-header-group}</style></head><body><h2>Government Secondary School · Bildi</h2><h3>Attendance report · ${dateLabel(loadedDate)}</h3><p>${escapeHtml(att('attendanceSummary').textContent)}</p><table><thead><tr>${headings.map(v=>`<th>${v}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(v=>`<td>${escapeHtml(v??'')}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`);w.document.close();w.focus();w.print();};
+  att('attendanceMonthly').onclick=async()=>{const month=att('attendanceMonth').value;if(!/^\d{4}-\d{2}$/.test(month)||month>today.slice(0,7)){attError('Select a valid month.');return;}attBusy(true);attError('');try{const [y,m]=month.split('-').map(Number);const end=month+'-'+new Date(y,m,0).getDate();const rows=reportRows(await fetchAttendance(month+'-01',end));if(!rows.length){attError('No saved attendance for this month.');return;}csvDownload(safeCsv([headings,...rows]),`attendance-${month}.csv`);}catch(e){attError(e.message);}finally{attBusy(false);}};
+  void loadAttendance();
 
   document.querySelector("#logoutBtn").addEventListener("click", async () => {
     await supabase.auth.signOut();
@@ -1307,7 +1406,7 @@ function escapeHtml(value) {
 }
 
 window.addEventListener("hashchange", render);
-supabase?.auth?.onAuthStateChange(() => {
-  if (location.hash === "#admin" || location.hash === "#dashboard") renderPortal();
-});
+// Authentication changes are handled by the login/logout handlers above.
+// Rendering from onAuthStateChange causes overlapping portal renders during
+// sign-in, token refresh and sign-out (and can race privileged requests).
 render();

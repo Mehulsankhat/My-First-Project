@@ -304,3 +304,57 @@ body.photo-viewer-open { overflow:hidden; }
 
 /* Public result photo layout */
 .public-result-profile{display:flex;gap:20px;align-items:flex-start;margin:20px 0}.public-result-profile .public-result-meta{flex:1;margin:0}.public-student-photo{width:110px;height:132px;flex-shrink:0;object-fit:cover;border:2px solid #245ca3;border-radius:7px;background:#fff}.public-student-photo-empty{display:flex;align-items:center;justify-content:center;color:#64748b;background:#f1f5f9;font-weight:700;font-size:13px}@media(max-width:600px){.public-result-profile{flex-wrap:wrap}.public-student-photo{order:-1}}
+
+.student-result-cards{display:grid;gap:14px}.student-result-group{background:#fff;border:1px solid #dbe6f5;border-radius:15px;padding:18px;margin:8px 0;min-width:0}.student-result-heading{display:flex;align-items:center;gap:14px}.student-result-heading>div{flex:1;min-width:0}.student-result-heading b{font-size:18px;color:#123b70}.student-result-heading p{color:#7184a3;margin:6px 0 0}.result-card-photo{width:54px;height:64px;object-fit:cover;border-radius:8px;border:1px solid #c6d7ee}.student-result-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}.student-result-stats span{display:grid;gap:5px;background:#f0f5fc;border-radius:10px;padding:12px}.student-result-stats small{color:#61758f}.student-result-stats strong{font-size:17px;color:#153e74}.student-result-detail{margin-top:15px;border-top:1px solid #dce5f1;padding-top:12px}.student-result-detail[hidden]{display:none}@media(max-width:600px){.student-result-stats{gap:6px}.student-result-stats span{padding:8px}.student-result-stats strong{font-size:13px}}
+
+/* Three-section staff login upgrade */
+.staff-role-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:22px 0 12px}
+.staff-role-tab{padding:12px 5px;border:1px solid #cbdced;border-radius:10px;background:#f5f9ff;color:#234a73;font:inherit;font-size:13px;font-weight:800;cursor:pointer}
+.staff-role-tab.active{background:#145da5;color:white;border-color:#145da5}
+.staff-password-row{display:flex;gap:8px;align-items:stretch}
+.staff-password-row input{min-width:0;flex:1}
+.staff-password-row button{white-space:nowrap;margin:0}
+.staff-text-button{border:0;background:none;color:#145da5;text-align:right;cursor:pointer;font:inherit;font-size:12px;font-weight:700}
+#showRegister,#resendStaffApproval{display:block;width:100%;margin-top:10px}
+#showRegister[hidden],#resendStaffApproval[hidden]{display:none}
+/* Password Input and Show/Hide Button Fix */
+
+.password-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.password-input-row input {
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
+  height: 45px;
+}
+
+.password-input-row button {
+  flex: 0 0 75px;
+  width: 75px;
+  min-width: 75px;
+  height: 45px;
+  padding: 0 8px;
+}
+/* Staff Login Password Field Fix */
+
+#staffLoginForm input#loginPassword {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box;
+}
+
+#staffLoginForm #toggleLoginPassword {
+  flex: 0 0 75px !important;
+  width: 75px !important;
+  min-width: 75px !important;
+  max-width: 75px !important;
+  padding: 10px 8px !important;
+  box-sizing: border-box;
+}
+.attendance-tools{display:flex;flex-wrap:wrap;align-items:end;gap:12px;margin:16px 0}.attendance-tools label{display:grid;gap:6px;flex:1;min-width:150px}.attendance-tools input,.attendance-tools select{padding:10px;border:1px solid #cbd5e1;border-radius:8px;background:white;color:#173653}.attendance-tools button{width:auto}.attendance-tools button:disabled{opacity:.5}.attendance-row{margin-bottom:8px}
