@@ -1,0 +1,11 @@
+LOGIN FORM UPGRADE
+1. Admin + Principal tabs: ONLY accounts with profiles.role = 'principal' may sign in. Both tabs open full management dashboard.
+2. Teacher tab: ONLY profiles.role = 'teacher' may sign in.
+3. Show/Hide password, Forgot Password, Create Teacher Account, Resend Approval Request.
+4. Supabase SQL Editor ma supabase/LOGIN-APPROVAL-RESEND-SETUP.sql run karo.
+5. Resend existing pending teacher request ne refresh kare chhe; duplicate request nathi banavtu. 5 minute cooldown.
+6. Resend email/SMS notification nathi mokaltu; Principal dashboard ni pending list ma request refresh thay chhe.
+7. IMPORTANT: Existing principal account nu profiles.role 'principal' hovu joiye. Jo currently 'admin' hoy, to pehla safely role migration kari ne verify karo. Admin tab ma legacy 'admin' profile allowed nathi.
+8. Supabase Auth ma password recovery redirect URL website URL allow-list ma hovu joiye.
+9. Existing student/result/data tables untouched.
+10. Run: npm install ; npm run dev

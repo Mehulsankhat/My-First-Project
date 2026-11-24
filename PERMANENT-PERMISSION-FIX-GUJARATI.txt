@@ -1,0 +1,11 @@
+PERMANENT FIX — Teacher Registration Approvals
+
+1. Supabase Dashboard > SQL Editor > New Query.
+2. Open supabase/FIX-STAFF-PORTAL-PERMISSIONS.sql from this ZIP.
+3. Paste the ENTIRE SQL and click Run (postgres role).
+4. Last SELECT should show: registration_select=true, directory_execute=true, removal_table_exposed=false.
+5. Refresh the website and sign in as Admin/Principal.
+
+WHY: The old RLS policy referenced staff_account_removals directly, although SELECT was revoked from authenticated. PostgreSQL checks privileges in an invoker RLS policy and returns 42501. The new SECURITY DEFINER helper checks role and removal status securely; it does not grant private removal data to all users.
+
+Important: Running an older SQL migration later can overwrite this policy. Re-run this final fix after older migrations if needed. No student, marks or attendance rows are changed.

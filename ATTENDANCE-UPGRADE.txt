@@ -1,0 +1,1 @@
+Attendance upgrade: select date and Search date, mark statuses, save. CSV opens in Excel. Print / Save PDF uses browser print dialog. Monthly CSV exports saved records only. Existing attendance table and RLS retained. Run npm install then npm run dev. No new SQL required if existing attendance schema and permissions work.

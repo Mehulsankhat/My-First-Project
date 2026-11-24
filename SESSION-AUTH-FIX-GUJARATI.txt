@@ -1,0 +1,11 @@
+STAFF PORTAL LOGIN SESSION FIX
+
+1. આ ZIP માં src/main.js ની overlapping Auth event renders દૂર કરેલી છે.
+2. Privileged Teacher Approvals અને Staff Directory પહેલાં current logged-in user ચકાસાય છે.
+3. anon ને table SELECT અથવા function EXECUTE આપવાનું નથી.
+4. Supabase SQL Editor માં supabase/FIX-STAFF-PORTAL-PERMISSIONS.sql ચલાવો (જો પહેલાં ચલાવેલ હોય તો ફરી જરૂરી નથી).
+5. Browser માં localhost ની જૂની session માટે Logout કરો, બધા localhost tabs બંધ કરો અને ફરી Admin/Principal Login કરો.
+6. Network માં staff_registration_requests અને list_teacher_accounts_for_management 200 હોવું જોઈએ.
+7. જો હજુ 401 હોય, Response અને Request Headers માંથી માત્ર Authorization header PRESENT છે કે નહીં તે જણાવો. Token મોકલશો નહીં.
+
+Note: Build test validates code syntax, not live Supabase authorization.
